@@ -406,18 +406,21 @@ function fg(ctx, opt) {
   }
   function kick(vel2) {
     if (!running || st !== 'rest') return;
-    const { pw, lat } = shotFromVel(vel2); tries++; st = 'fly'; ctx.sfx('bounce'); ctx.sfx('throw');
-    const R = (DIST[stage] + 7 * YD + 10) * pw, th = 0.66, sp = Math.sqrt(R * 9.8 / Math.sin(2 * th)), ang = lat * 0.32;
+    const { pw, lat } = shotFromVel(vel2); tries++; st = 'fly'; slowed = false; ctx.sfx('bounce'); ctx.sfx('throw'); ctx.shake(0.15);
+    // alcance según la distancia real desde donde está el balón (en el tee o sobre tu piso) hasta los postes
+    const R = (ball.position.z - PZ + 10) * pw, th = 0.66, sp = Math.sqrt(R * 9.8 / Math.sin(2 * th)), ang = lat * 0.32;
     vel.set(Math.sin(ang) * Math.cos(th) * sp, Math.sin(th) * sp, -Math.cos(ang) * Math.cos(th) * sp);
     fbT = 0;
   }
+  let slowed = false;
   const intro = withIntro(ctx, opt, [{ t: 0, p: [18, 14, 30], yaw: 0.6, pitch: -0.3 }, { t: 4, p: [0, 1.6, spotZ() + 4.2], yaw: 0, pitch: 0.04 }], 0, 0.04, () => setup());
-  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Mírate en el recuadro de la cámara: quieto un segundo y patea hacia el celular' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, hacia los postes' : '👆 Pon el dedo y desliza rápido hacia los postes');
+  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea!' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, hacia los postes' : '👆 Pon el dedo y desliza rápido hacia los postes');
   const PI0 = modelInfo('postes') || POSTS0; // ancho real de tus postes (centro de cada parante)
   setup();
   return {
     camLock: !opt.quick, foot: true, refreshHint: startHint,
     start() { running = true; this.camLock = false; setup(); startHint(); },
+    canKick: () => running && st === 'rest',
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
     onMove(p) { if (running && p.src === 'hand' && !ctx.footOn()) { const v = flick(p); if (v) kick(v); } },
     onUp(p) { if (!running || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) kick(v); },
@@ -427,21 +430,26 @@ function fg(ctx, opt) {
       ST.cheer(t, cel > 0 ? 0.3 : 0.02); cel = Math.max(0, cel - dt);
       g.traverse(o => { if (o.userData.flag) o.rotation.y = Math.sin(t * 3) * 0.4; });
       if (cel > 0) { refs[0].arms.forEach(a => (a.sh.rotation.x = -3)); team.slice(0, 7).forEach(P => P.arms.forEach(a => (a.sh.rotation.x = -2.9))); } else idleAnim(ref, t);
+      if (st === 'rest' && ctx.footOn() && running) { ctx.floorBall(ball.position); ball.rotation.set(0.35, t * 0.6, 0); } // el balón espera sobre tu piso real
       if (st === 'fly') {
         fbT += dt; vel.y -= 9.8 * dt; const pz = ball.position.z; ball.position.addScaledVector(vel, dt); ball.rotation.x -= dt * 12;
+        if (!slowed && !crossed && ball.position.z - PZ < 5 && ball.position.y > 2) { slowed = true; ctx.slowmo(0.7, 0.4); } // suspenso: ¿entra o no?
         if (!crossed && pz > PZ && ball.position.z <= PZ) {
           crossed = true;
           const ok = Math.abs(ball.position.x) < PI0.half && ball.position.y > PI0.bar;
-          if (ok) { good++; cel = 2.5; ctx.sfx('crowd'); ctx.sfx('score'); ctx.burst(_v.set(0, 12, PZ), [0xf47321, 0x00843d, 0xffffff, 0xffd400], 120, 4); ctx.toast('🏈 ¡ES BUENO! Gol de campo', 2500); }
-          else { ctx.sfx('lose'); ctx.toast(ball.position.y <= PI0.bar ? '❌ ¡Le faltó fuerza! Patea más fuerte.' : '❌ ¡Desviado! Patea más recto.', 2500); }
+          if (ok) { good++; cel = 2.5; ctx.sfx('crowd'); ctx.sfx('score'); ctx.shake(0.35); ctx.pop('¡ES BUENO!'); ctx.burst(_v.set(0, 12, PZ), [0xf47321, 0x00843d, 0xffffff, 0xffd400], 120, 4); }
+          else { ctx.sfx('lose'); ctx.pop(ball.position.y <= PI0.bar ? 'LE FALTÓ FUERZA' : '¡DESVIADO!', 'bad'); }
           setTimeout(() => {
             if (!running) return;
-            if (ok) { if (good >= 3) { running = false; ctx.win('fg'); return; } stage = Math.min(2, stage + 1); ctx.toast(`📍 Ahora desde ${Math.round(DIST[stage] / YD)} yardas`, 2500); }
+            if (ok) {
+              if (good >= 3) { running = false; const medal = tries <= 3 ? 'oro' : tries <= 5 ? 'plata' : 'bronce'; ctx.win('fg', { medal, line: `🏈 3 goles en ${tries} intentos` }); return; }
+              stage = Math.min(2, stage + 1); ctx.toast(`📍 Ahora desde ${Math.round(DIST[stage] / YD)} yardas`, 2500);
+            }
             setup();
           }, 2300);
         }
         if (ball.position.y < 0.12) { ball.position.y = 0.12; vel.multiplyScalar(0.4); vel.y = Math.abs(vel.y) * 0.4; }
-        if (fbT > 6 && !crossed) { crossed = true; ctx.toast('❌ ¡No llegó!', 2000); setTimeout(() => running && setup(), 1500); }
+        if (fbT > 6 && !crossed) { crossed = true; ctx.pop('¡NO LLEGÓ!', 'bad'); setTimeout(() => running && setup(), 1500); }
       }
     },
     dispose() { running = false; }
@@ -496,18 +504,21 @@ function penalty(ctx, opt) {
   }
   function shoot(vel2) {
     if (!running || st !== 'rest') return;
-    const { pw, lat } = shotFromVel(vel2); shots++; st = 'fly'; flyT = 0; ctx.sfx('bounce'); ctx.sfx('throw');
-    const tx = clamp(lat * 1.8, -1.4, 1.4) * 3.66, ty = clamp(0.25 + (pw - 0.75) * 2.8, 0.12, 3.4), T = 0.62 / clamp(pw, 0.7, 1.4);
-    vel.set(tx / T, (ty - 0.11) / T + 0.5 * 9.8 * T, GZ / T);
+    const { pw, lat } = shotFromVel(vel2); shots++; st = 'fly'; flyT = 0; slowed = false; ctx.sfx('bounce'); ctx.sfx('throw'); ctx.shake(0.15);
+    // trayectoria desde donde está el balón (punto penal o sobre tu piso real) hasta el punto elegido del arco
+    const P0 = ball.position, tx = clamp(lat * 1.8, -1.4, 1.4) * 3.66, ty = clamp(0.25 + (pw - 0.75) * 2.8, 0.12, 3.4), T = 0.62 / clamp(pw, 0.7, 1.4) * (GZ - P0.z) / GZ;
+    vel.set((tx - P0.x) / T, (ty - P0.y) / T + 0.5 * 9.8 * T, (GZ - P0.z) / T);
     const r = Math.random(); dive = r < 0.4 ? -1 : r < 0.8 ? 1 : 0; diveT = 0.001; // el portero adivina un lado
     saveX = dive * 2.3;
   }
   const intro = withIntro(ctx, opt, [{ t: 0, p: [10, 9, 14], yaw: 0.6, pitch: -0.32 }, { t: 3.8, p: [0, 1.6, 2.8], yaw: 0, pitch: -0.05 }], 0, -0.05, () => setup());
-  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Mírate en el recuadro de la cámara: quieto un segundo y patea hacia el celular (un poco a un lado para apuntar)' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba; inclínalo a un lado para apuntar' : '👆 Desliza hacia el arco: la inclinación apunta y la velocidad es la fuerza');
+  let slowed = false;
+  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea! (un poco a un lado para apuntar)' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba; inclínalo a un lado para apuntar' : '👆 Desliza hacia el arco: la inclinación apunta y la velocidad es la fuerza');
   setup();
   return {
     camLock: !opt.quick, foot: true, refreshHint: startHint,
     start() { running = true; this.camLock = false; setup(); startHint(); },
+    canKick: () => running && st === 'rest',
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
     onMove(p) { if (running && p.src === 'hand' && !ctx.footOn()) { const v = flick(p); if (v) shoot(v); } },
     onUp(p) { if (!running || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) shoot(v); },
@@ -524,19 +535,22 @@ function penalty(ctx, opt) {
         kx = Math.sin(t * 1.6) * 0.8; K.p.position.x = kx; K.legs.forEach(l => { l.th.rotation.x = -0.4; l.kn.rotation.x = 0.7; }); K.hips.position.y = K.leg - 0.12;
         K.arms.forEach(a => { a.sh.rotation.z = a.s * 0.7; a.sh.rotation.x = -0.3; a.el.rotation.x = -0.4; });
       }
+      if (st === 'rest' && ctx.footOn() && running) { ctx.floorBall(ball.position); ball.rotation.set(0, t * 0.6, 0); } // el balón espera sobre tu piso real
       if (st === 'fly') {
         flyT += dt; vel.y -= 9.8 * dt; const pz = ball.position.z; ball.position.addScaledVector(vel, dt); ball.rotation.x -= dt * 20;
+        if (!slowed && !res && ball.position.z - GZ < 3) { slowed = true; ctx.slowmo(0.45, 0.35); } // suspenso frente al portero
         if (pz > GZ && ball.position.z <= GZ && !res) {
           const { x, y } = ball.position, inGoal = Math.abs(x) < GI.half - GI.postR && y < GI.bar - 0.04 && y > 0;
           const handX = K.p.position.x - Math.sin(K.p.rotation.z) * 1.0, handY = 1.0 + K.p.position.y + Math.cos(K.p.rotation.z) * 0.9;
           const saved = inGoal && (dive ? Math.abs(x - handX) < 1.15 && y < 2.3 : Math.abs(x) < 0.85 && y < 2.4);
-          if (!inGoal) { res = 'out'; ctx.sfx(Math.abs(Math.abs(x) - 3.66) < 0.2 || Math.abs(y - 2.44) < 0.2 ? 'rim' : 'lose'); ctx.toast(Math.abs(Math.abs(x) - 3.66) < 0.25 ? '🥅 ¡Al palo!' : '❌ ¡Afuera!', 2000); vel.set(vel.x * 0.3, 2, 3); }
-          else if (saved) { res = 'save'; ctx.sfx('block'); ctx.toast('🧤 ¡Atajada del portero!', 2000); vel.set(-vel.x * 0.3, 3, 6); }
-          else { res = 'goal'; goals++; cel = 2.5; netK = 1; ctx.sfx('crowd'); ctx.sfx('score'); ctx.burst(_v.set(x, y, GZ - 1), [0xf7b5cd, 0xffffff, 0x111111], 80, 3); ctx.toast('⚽ ¡GOOOL!', 2000); vel.multiplyScalar(0.15); }
+          const corner = Math.abs(x) > 2.4 || y > 1.7; // esquinas y parte alta: más difícil de atajar
+          if (!inGoal) { res = 'out'; const palo = Math.abs(Math.abs(x) - 3.66) < 0.25 || Math.abs(y - 2.44) < 0.2; ctx.sfx(palo ? 'rim' : 'lose'); ctx.pop(palo ? '¡AL PALO!' : '¡AFUERA!', 'bad'); if (palo) ctx.shake(0.3); vel.set(vel.x * 0.3, 2, 3); }
+          else if (saved) { res = 'save'; ctx.sfx('block'); ctx.pop('¡ATAJADA!', 'bad'); ctx.shake(0.25); vel.set(-vel.x * 0.3, 3, 6); }
+          else { res = 'goal'; goals++; cel = 2.5; netK = 1; ctx.sfx('crowd'); ctx.sfx('score'); ctx.shake(0.45); ctx.burst(_v.set(x, y, GZ - 1), [0xf7b5cd, 0xffffff, 0x111111], 80, 3); ctx.pop(corner ? '¡GOLAZO AL ÁNGULO!' : '¡GOOOL!', corner ? 'fire' : 'good'); vel.multiplyScalar(0.15); }
           info();
           setTimeout(() => {
             if (!running) return;
-            if (goals >= 3) { running = false; ctx.win('penalty'); return; }
+            if (goals >= 3) { running = false; const medal = shots <= 3 ? 'oro' : shots <= 4 ? 'plata' : 'bronce'; ctx.win('penalty', { medal, line: `⚽ ${goals} goles en ${shots} penales` }); return; }
             if (shots >= 5) { running = false; ctx.lose(`Hiciste ${goals} de 5 goles. Necesitas 3. Apunta a las esquinas: el portero no siempre adivina.`); return; }
             setup();
           }, 2200);
@@ -740,30 +754,30 @@ function waterTour(ctx, opt) {
 /* ---------- iconos de portal y catálogo ---------- */
 export const GAMES2 = {
   miami: {
-    short: 'Tour acuático', title: '🚤 Miami Beach — Tour acuático', winMsg: '¡Completaste el tour acuático por Miami Beach!', create: waterTour,
+    short: 'Tour acuático', title: '🚤 Miami Beach — Tour acuático', pix: 'TOUR ACUÁTICO', tag: 'MIAMI BEACH · BAHÍA', winMsg: '¡Completaste el tour acuático por Miami Beach!', create: waterTour,
     how: h => 'Recorres la costa de Miami Beach por el mar: <b>a tu derecha</b> verás la playa, las palmeras, los edificios Art Déco y animales.<br>🚤 El vehículo avanza solo. Tú solo eliges el <b>carril</b>: ' + (h ? 'mueve tu índice a la izquierda, al centro o a la derecha' : 'botones <b>◀ ▶</b> o desliza el dedo') + '.<br>⭐ Recoge estrellas · 🔴🟢 esquiva las boyas (tienes 3 ❤️) · 📸 toca los animales para fotografiarlos.<br>❓ En 3 paradas respondes una pregunta sobre Miami. ¡Llega a la meta!',
     fact: 'Florida es conocida como “The Sunshine State” (el Estado del Sol), y Miami Beach es una de sus playas más famosas del mundo.'
   },
   heroes: {
-    short: 'Isla de Héroes', title: '🦸 Orlando — Isla de Héroes', winMsg: '¡Salvaste la Isla de Héroes!', create: heroes,
+    short: 'Isla de Héroes', title: '🦸 Orlando — Isla de Héroes', pix: 'ISLA DE HÉROES', tag: 'ORLANDO · INVASIÓN DE DRONES', winMsg: '¡Salvaste la Isla de Héroes!', create: heroes,
     icon() { const i = new THREE.Group(); const m = weaponModel(2); m.scale.setScalar(0.42); i.add(m); return i; },
     how: h => '🚨 ¡Unos drones invaden el parque de superhéroes!<br>1️⃣ <b>Elige tu arma</b> con los botones de abajo.<br>2️⃣ Los drones aparecen <b>de uno en uno frente a ti</b>, marcados con un <b>aro rojo</b>.<br>3️⃣ Pulsa el botón grande de ataque ' + (h ? '(o haz pinza)' : '(o toca la pantalla)') + '. Cada dron aguanta 2 golpes.<br><b>Derriba 5 drones.</b>',
     fact: 'Islands of Adventure, en Universal Orlando, abrió en 1999 y una de sus zonas está dedicada a los superhéroes de cómic.'
   },
   city: {
-    short: 'Miami urbano', title: '🌆 Miami — Exploración urbana', winMsg: '¡Has explorado Miami!', create: city,
+    short: 'Miami urbano', title: '🌆 Miami — Exploración urbana', pix: 'MIAMI URBANO', tag: 'OCEAN DRIVE · 60 SEGUNDOS', countdown: true, winMsg: '¡Has explorado Miami!', create: city,
     icon() { const i = new THREE.Group(); add(i, box(0.16, 0.26, 0.1), M(0xffc2d1), 0, 0, 0, false); add(i, box(0.03, 0.32, 0.03), M(0x24d1ff, { emissive: 0x24d1ff }), 0, 0.02, 0.06, false); return i; },
     how: h => 'Estás en Ocean Drive, Miami Beach. Gira el celular (o arrastra) para mirar: la playa, la calle y los edificios Art Déco. Encuentra 5 objetos en <b>60 segundos</b>: 🔑 🕶️ 🏄 📷 🪙. Sigue la flecha amarilla y los haces de luz. ' + (h ? 'Deja tu <b>índice</b> quieto sobre cada objeto.' : '<b>Toca</b> cada objeto.'),
     fact: 'Miami Beach tiene una de las mayores concentraciones de arquitectura Art Déco del mundo. Su distrito histórico entró al Registro Nacional de Lugares Históricos de EE. UU. en 1979.'
   },
   fg: {
-    short: 'Fútbol americano', title: '🏈 Field Goal Challenge', winMsg: '¡Eres el pateador estrella!', create: fg, foot: true,
+    short: 'Fútbol americano', title: '🏈 Field Goal Challenge', pix: 'GOL DE CAMPO', tag: 'FÚTBOL AMERICANO · 3 GOLES', countdown: true, winMsg: '¡Eres el pateador estrella!', create: fg, foot: true,
     icon() { const i = new THREE.Group(); const b = fbBall(); b.scale.setScalar(1); i.add(b); return i; },
     how: h => 'Eres el pateador. Patea el balón para que pase <b>entre los postes amarillos y por encima del travesaño</b>. Cada gol te aleja más (20, 30 y 40 yardas). <b>Consigue 3 goles de campo.</b> Puedes patear con tu pie real frente a la cámara (te verás en un recuadro) ' + (h ? 'o mover tu <b>índice rápido hacia arriba</b>.' : 'o deslizar el dedo.'),
     fact: 'Florida tiene tres equipos de la NFL: los Miami Dolphins, los Tampa Bay Buccaneers y los Jacksonville Jaguars.'
   },
   penalty: {
-    short: 'Penales', title: '⚽ Penalty Challenge', winMsg: '¡Ganaste la tanda de penales!', create: penalty, foot: true,
+    short: 'Penales', title: '⚽ Penalty Challenge', pix: 'PENALES', tag: 'FÚTBOL · 5 TIROS', countdown: true, winMsg: '¡Ganaste la tanda de penales!', create: penalty, foot: true,
     icon() { const i = new THREE.Group(); i.add(modelo('balon-futbol', { fallback: () => new THREE.Mesh(sph(0.11, 24), soccerBallMat()), onLoad: o => o.scale.setScalar(0.11) })); return i; },
     how: h => 'Tienes <b>5 penales</b>. Apunta a las esquinas: el portero se lanza hacia un lado. <b>Marca al menos 3 goles.</b> Puedes patear con tu pie real frente a la cámara (te verás en un recuadro) ' + (h ? 'o mover tu <b>índice rápido hacia arriba</b> (inclinado a un lado para apuntar).' : 'o deslizar el dedo (la inclinación apunta, la velocidad es la fuerza).'),
     fact: 'El Inter Miami CF juega en la MLS desde 2020.'

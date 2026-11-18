@@ -1706,10 +1706,15 @@ function heat(ctx, opt) {
   const ball2 = ballModel(24); g.add(ball2);
   // Balón del jugador (tu modelo FBX)
   const ball = ballModel(32); g.add(ball);
-  const st = { mode: 'rest', v: new V3(), t: 0, scored: false, fb: '', inNet: 0, lastBounce: 0 };
+  // ===== Mecánica: TOCAR = driblar · MANTENER = subir el balón y llenar el medidor · SOLTAR en VERDE = tiro perfecto =====
+  // Driblar antes de tirar agranda la zona verde (ritmo). 3 canastas seguidas = ¡EN LLAMAS! (3 puntos por canasta).
+  const st = { mode: 'rest', v: new V3(), t: 0, scored: false, inNet: 0, lastBounce: 0, rim: false, perfect: false, err: 0, slowed: false };
   let running = false, alive = true, baskets = 0, pts = 0, shots = 0, cel = 0, netK = 0, netW = 0;
-  const _d = new V3(), _q = new V3(), _n = new V3();
-  const info = () => ctx.info(`🏀 Canastas ${baskets}/5 · Puntos ${pts} · Tiros ${shots}`);
+  let streak = 0, fire = false, time = 0, press = null, infoT = 0;
+  const drib = { t: 0, n: 0, last: 0, hit: false }, set = { t: 0, lat: 0, x0: 0 };
+  const _d = new V3(), _q = new V3(), _n = new V3(), _h = new V3(), _r = new V3(), _k = new V3();
+  const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const info = () => ctx.info(`🏀 ${baskets}/5 · ${pts} pts · ⏱ ${fmt(time)}${fire ? ' · 🔥' : streak ? ` · racha ${streak}` : ''}`);
   const SPOTS = [[0, 0, 'Tiro libre'], [-3.6, -1.2, 'Ala izquierda'], [3.6, -1.2, 'Ala derecha'], [0, 2.2, 'Frente al aro, más lejos'], [-2, 1.2, 'Diagonal izquierda']];
   const spot = new V3(0, 1.6, 0), spotFrom = new V3(0, 1.6, 0); let spotT = 1;
   function moveSpot(i) {
@@ -1718,58 +1723,114 @@ function heat(ctx, opt) {
   }
   function drawBoard() {
     const c = sbTex.userData.g, w = 512, h = 200;
-    c.fillStyle = '#050505'; c.fillRect(0, 0, w, h); c.strokeStyle = '#c8102e'; c.lineWidth = 8; c.strokeRect(4, 4, w - 8, h - 8);
+    c.fillStyle = '#050505'; c.fillRect(0, 0, w, h); c.strokeStyle = fire ? '#ff6a1a' : '#c8102e'; c.lineWidth = 8; c.strokeRect(4, 4, w - 8, h - 8);
     c.textAlign = 'center'; c.fillStyle = '#ff3344'; c.font = 'bold 34px monospace'; c.fillText('PUNTOS    CANASTAS', w / 2, 50);
     c.font = 'bold 100px monospace'; c.fillStyle = '#ffd54a'; c.fillText(String(pts).padStart(2, '0'), 140, 160); c.fillText(`${baskets}/5`, 370, 160);
     sbTex.needsUpdate = true;
   }
   drawBoard();
-  const restPos = () => camera.localToWorld(_v.set(0, -0.42, -0.9));
-  const holdPos = () => ctx.ptr.ray.ray.at(0.75, _v);
-  ball.position.copy(restPos());
-
-  function shoot(vel) {
-    st.mode = 'fly'; st.t = 0; st.scored = false; st.inNet = 0; shots++; info(); ctx.sfx('throw');
-    const pw = clamp(1 + Math.log(Math.max(vel.y, 0.1) / 2.8) * 0.6, 0.5, 1.6), lat = clamp(vel.x / Math.max(vel.y, 0.1), -1, 1);
-    st.fb = pw > 1.15 ? 'Un poco más suave 👇' : pw < 0.85 ? '¡Más fuerte! 💪' : Math.abs(lat) > 0.16 ? 'Lanza más recto ⬆️' : '¡Casi!';
-    // la dirección se calcula respecto a hacia dónde miras
-    const fwd = _u.set(0, 0, -1).applyQuaternion(camera.quaternion); fwd.y = 0; fwd.normalize();
-    const right = new V3(-fwd.z, 0, fwd.x);
-    const tgt = RIM.clone().addScaledVector(right, lat * 0.55).add(_w.set(0, 0.03, 0.03 - (pw - 1) * 0.5));
-    const T = 1.0;
+  // dónde va el balón: en tu mano (abajo a la derecha), en el piso al driblar y frente a tu cara al preparar el tiro
+  const HOLD = new V3(0.16, -0.4, -0.85), SETP = new V3(0, 0.03, -0.72), DRIB_T = 0.42;
+  const handPos = o => camera.localToWorld(o.copy(HOLD));
+  const setPos = o => camera.localToWorld(o.set(SETP.x + set.lat * 0.08, SETP.y, SETP.z));
+  ball.position.copy(handPos(_h));
+  // medidor de tiro: se llena en FILL segundos; la zona verde está centrada en GREEN
+  const meterEl = document.getElementById('meter'), zoneEl = meterEl.querySelector('.zone'), markEl = meterEl.querySelector('.mark');
+  const FILL = 0.95, GREEN = 0.86;
+  const greenHalf = () => 0.06 + Math.min(drib.n, 4) * 0.012 + (fire ? 0.02 : 0);
+  function showMeter(on) {
+    meterEl.classList.toggle('hidden', !on); meterEl.classList.toggle('hot', fire);
+    const hw = greenHalf(); zoneEl.style.bottom = (GREEN - hw) * 100 + '%'; zoneEl.style.height = hw * 200 + '%'; markEl.style.bottom = '0%';
+  }
+  function dribble() {
+    if (st.mode !== 'rest') return;
+    st.mode = 'drib'; drib.t = 0; drib.hit = false;
+  }
+  function startSet(x0 = 0) {
+    if (st.mode !== 'rest' && st.mode !== 'drib') return;
+    st.mode = 'set'; set.t = 0; set.lat = 0; set.x0 = x0; showMeter(true); ctx.sfx('charge');
+  }
+  function cancelSet() { if (st.mode === 'set') { st.mode = 'rest'; showMeter(false); } }
+  function release() {
+    if (st.mode !== 'set') return;
+    const m = set.t / FILL, hw = greenHalf(), e = m - GREEN, perfect = Math.abs(e) <= hw;
+    const err = perfect ? 0 : clamp((e - Math.sign(e) * hw) / 0.3, -1, 1);
+    showMeter(false); shoot(err, set.lat, perfect);
+    if (perfect) { ctx.pop('¡PERFECTO!'); ctx.sfx('perfect'); if (navigator.vibrate) navigator.vibrate(25); }
+    else ctx.pop(err < 0 ? 'MUY PRONTO' : 'MUY TARDE', 'bad');
+  }
+  function shoot(err, lat, perfect) {
+    st.mode = 'fly'; st.t = 0; st.scored = false; st.inNet = 0; st.rim = false; st.perfect = perfect; st.err = err; st.slowed = false;
+    shots++; drib.n = 0; info(); ctx.sfx('throw');
+    // apunta solo hacia el aro (aunque mires hacia otro lado); soltar pronto = corto, tarde = largo
+    const toRim = _r.copy(RIM).sub(camera.position); toRim.y = 0; toRim.normalize();
+    const right = _k.set(-toRim.z, 0, toRim.x), tgt = RIM.clone().addScaledVector(right, lat * 0.5);
+    if (perfect) tgt.add(_w.set(rnd(-0.02, 0.02), 0.02, rnd(-0.02, 0.02)));
+    else { tgt.addScaledVector(toRim, err * 0.26 - 0.03).addScaledVector(right, rnd(-0.05, 0.05)); tgt.y += 0.03; }
+    const T = 0.95 + camera.position.distanceTo(RIM) * 0.02;
     st.v.copy(tgt).sub(ball.position).divideScalar(T); st.v.y += 0.5 * GRAV * T;
   }
   function score() {
-    st.scored = true; st.inNet = 0.5; baskets++; pts += 2; cel = 2; netK = 1; info(); drawBoard();
+    st.scored = true; st.inNet = 0.5; baskets++; streak++; cel = 2; netK = 1;
+    const swish = !st.rim, wasFire = fire;
+    if (streak >= 3 && !fire) { fire = true; ctx.pop('¡EN LLAMAS! 🔥', 'fire'); ctx.sfx('fire'); ctx.shake(0.5); }
+    const add2 = (wasFire ? 3 : 2) + (swish ? 1 : 0); pts += add2;
+    if (!(fire && !wasFire)) ctx.pop(swish ? `¡SWISH! +${add2}` : `¡CANASTA! +${add2}`, wasFire ? 'fire' : 'good');
+    info(); drawBoard(); ctx.shake(0.3);
     ctx.sfx('swish'); setTimeout(() => { ctx.sfx('crowd'); ctx.sfx('score'); }, 120);
-    ctx.burst(RIM, [0xff2a2a, 0xffffff, 0xf9a01b], 80, 2.5);
-    if (baskets >= 5) { running = false; setTimeout(() => ctx.win('heat'), 1300); }
+    ctx.burst(RIM, fire ? [0xff6a1a, 0xffd54a, 0xffffff] : [0xff2a2a, 0xffffff, 0xf9a01b], 90, 2.5);
+    if (baskets >= 5) { running = false; finish(); }
     else setTimeout(() => { if (alive) moveSpot(baskets); }, 1600);
+  }
+  function finish() { // medalla según el tiempo y récord guardado en el celular
+    ctx.sfx('buzzer');
+    const medal = time <= 45 ? 'oro' : time <= 75 ? 'plata' : 'bronce', b = ctx.best('heat', Math.round(time), true);
+    setTimeout(() => ctx.win('heat', { medal, line: `⏱ ${fmt(time)} · ${pts} puntos · ${shots} tiros`, record: b.isNew ? '¡NUEVO RÉCORD!' : `RÉCORD: ${fmt(b.best)}` }), 1300);
+  }
+  function handMove(p) { // con la mano: bajarla rápido = driblar · subirla = preparar · golpe hacia arriba = soltar
+    const v = p.vel(120), y = p.ndc.y;
+    if (st.mode === 'rest' || st.mode === 'drib') {
+      if (y > 0.25) startSet(p.ndc.x);
+      else if (st.mode === 'rest' && v.y < -1.6) dribble();
+    } else if (st.mode === 'set') {
+      set.lat = clamp((p.ndc.x - set.x0) * 1.6, -1, 1);
+      if (v.y > 1.8 && set.t > 0.15) release(); else if (y < -0.15) cancelSet();
+    }
   }
   const intro = withIntro(ctx, opt, [
     { t: 0, p: [6, 9, 18], yaw: 0.35, pitch: -0.3 },
     { t: 2.8, p: [1.5, 3.5, 5], yaw: 0.1, pitch: -0.05 },
     { t: 4.3, p: [0, 1.6, 0], yaw: 0, pitch: 0.18 }
   ], 0, 0.15);
-  const startHint = () => alive && ctx.hint(ctx.isHand() ? '☝️ El balón sigue tu índice · sube el dedo rápido hacia la canasta para lanzar' : '👆 Pon el dedo y desliza rápido hacia la canasta');
+  const startHint = () => alive && ctx.hint(ctx.isHand()
+    ? '✋ Baja la mano rápido para <b>driblar</b> · súbela para <b>preparar</b> y lánzala hacia arriba cuando la marca esté en el <b>VERDE</b>'
+    : '👆 <b>Toca</b> para driblar · <b>mantén</b> presionado y <b>suelta</b> cuando la marca esté en el <b>VERDE</b>');
   return {
     camLock: !opt.quick, refreshHint: startHint,
     start() { running = true; this.camLock = false; info(); startHint(); },
-    onDown() { if (intro.on) { intro.finish(); this.camLock = false; return; } if (running && st.mode === 'rest') st.mode = 'hold'; },
+    onDown(p) {
+      if (intro.on) { intro.finish(); this.camLock = false; return; }
+      if (!running) return;
+      if (p.src === 'hand') { if (st.mode === 'set' && set.t > 0.15) release(); return; } // pinza = soltar
+      if (st.mode === 'rest' || st.mode === 'drib') press = { t: performance.now(), x: p.sx, set: false };
+    },
     onMove(p) {
       if (!running) return;
-      if (p.src === 'hand') {
-        if (st.mode === 'rest') st.mode = 'hold';
-        if (st.mode === 'hold') { const v = p.vel(120); if (v.y > 2.4) shoot(v); }
-      }
+      if (p.src === 'hand') { handMove(p); return; }
+      if (press && st.mode === 'set') set.lat = clamp((p.sx - press.x) / (innerWidth * 0.3), -1, 1); // deslizar mientras sostienes = apuntar
     },
-    onUp(p) { if (st.mode !== 'hold' || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) shoot(v); else st.mode = 'rest'; },
+    onUp(p) {
+      if (!running || p.src === 'hand' || !press) return;
+      press = null;
+      if (st.mode === 'set') { if (set.t < 0.15) { cancelSet(); dribble(); } else release(); }
+      else dribble();
+    },
     update(dt, t) {
       if (intro.on) { intro.update(dt); if (!intro.on) this.camLock = false; }
       // público, bailarinas y vallas LED
       mixers.forEach(m => m.update(dt));
       if ((this._f = (this._f || 0) + 1) % 2 === 0) layoutCrowd(t, cel);
-      ledT.offset.x = (ledT.offset.x + dt * 0.12) % 1;
+      ledT.offset.x = (ledT.offset.x + dt * (fire ? 0.4 : 0.12)) % 1;
       g.children.forEach(o => { if (o.name === 'banner') o.rotation.y = Math.sin(t * 0.8 + o.userData.ph) * 0.06; });
       // rival en defensa y árbitro
       R.legs.forEach(l => { l.th.rotation.x = -0.5; l.kn.rotation.x = 0.75; }); R.hips.position.y = R.leg - 0.16;
@@ -1783,7 +1844,7 @@ function heat(ctx, opt) {
         ball2.position.lerp(P.p.localToWorld(_v.set(0.4, 0.12, 0.3)), 0.2);
       } else {
         P.p.position.y = 0; P.hips.position.y = P.leg - 0.06 - dr * 0.04;
-        P.legs.forEach((l, i) => { l.th.rotation.x = -0.25 - dr * 0.1; l.kn.rotation.x = 0.4 + dr * 0.15; });
+        P.legs.forEach(l => { l.th.rotation.x = -0.25 - dr * 0.1; l.kn.rotation.x = 0.4 + dr * 0.15; });
         P.arms[0].sh.rotation.x = -0.3; P.arms[0].el.rotation.x = -0.6;
         P.arms[1].sh.rotation.x = -0.5 - dr * 0.3; P.arms[1].el.rotation.x = -0.4;
         ball2.position.copy(P.p.localToWorld(_v.set(0.32, BR + (1 - dr) * 0.72, 0.35)));
@@ -1802,40 +1863,68 @@ function heat(ctx, opt) {
         pa[i] = b[i] * sq; pa[i + 2] = b[i + 2] * sq; pa[i + 1] = b[i + 1] * (1 + k * 0.5 * Math.sin(netW * 0.7 - r * 2));
       }
       H1.net.geometry.attributes.position.needsUpdate = true;
-      // balón
+      // reloj, presionar largo = preparar tiro, y fuego
+      if (running) { time += dt; infoT += dt; if (infoT > 0.25) { infoT = 0; info(); } }
+      if (running && press && !press.set && (st.mode === 'rest' || st.mode === 'drib') && performance.now() - press.t > 200) { press.set = true; startSet(); }
+      if (running && ctx.isHand() && st.mode === 'set' && !ctx.handVisible() && set.t > 0.15) release(); // la mano salió por arriba: soltó
       ball.visible = !intro.on;
-      if (st.mode === 'rest') { ball.position.lerp(restPos(), 0.3); ball.rotation.y += dt; return; }
-      if (st.mode === 'hold') { if (ctx.isHand() && !ctx.handVisible()) { st.mode = 'rest'; return; } ball.position.lerp(holdPos(), 0.55); return; }
+      if (fire && ball.visible && Math.random() < 0.6) ctx.burst(ball.position, [0xff6a1a, 0xffb000, 0xffe08a], 1, 0.5);
+      // balón
+      if (st.mode === 'rest') { ball.position.lerp(handPos(_h), 0.3); ball.rotation.y += dt; if (drib.n && performance.now() - drib.last > 3000) drib.n = 0; return; }
+      if (st.mode === 'drib') {
+        drib.t += dt; const p = drib.t / DRIB_T, H = handPos(_h);
+        if (p < 0.5) ball.position.set(H.x, lerp(H.y, BR, (p * 2) ** 2), H.z);
+        else {
+          if (!drib.hit) { drib.hit = true; ctx.sfx('dribble'); ctx.shake(0.06); drib.n++; drib.last = performance.now(); if (drib.n >= 2 && drib.n <= 4) ctx.pop(`RITMO x${drib.n}`, 'small'); }
+          ball.position.set(H.x, lerp(BR, H.y, 1 - (1 - (p - 0.5) * 2) ** 2), H.z);
+        }
+        ball.rotation.x -= dt * 10;
+        if (p >= 1) { st.mode = 'rest'; ball.position.copy(H); }
+        return;
+      }
+      if (st.mode === 'set') {
+        set.t += dt; const m = set.t / FILL;
+        ball.position.lerp(setPos(_h), 0.35); ball.rotation.y += dt * 2;
+        markEl.style.bottom = Math.min(m, 1) * 100 + '%';
+        if (m > 1.25) release(); // si esperas demasiado, el balón sale tarde
+        return;
+      }
       const sub = 4, h = dt / sub, Pp = ball.position, front = BB_Z + 0.02;
       for (let i = 0; i < sub; i++) {
         const prevY = Pp.y;
         st.v.y -= GRAV * h; Pp.addScaledVector(st.v, h);
-        if (st.v.z < 0 && Pp.z - BR < front && Pp.z > BB_Z - 0.2 && Math.abs(Pp.x) < HI.board.half && Pp.y > HI.board.bottom && Pp.y < HI.board.top) { Pp.z = front + BR; st.v.z *= -0.6; st.v.x *= 0.85; ctx.sfx('rim'); }
+        if (st.v.z < 0 && Pp.z - BR < front && Pp.z > BB_Z - 0.2 && Math.abs(Pp.x) < HI.board.half && Pp.y > HI.board.bottom && Pp.y < HI.board.top) { Pp.z = front + BR; st.v.z *= -0.6; st.v.x *= 0.85; st.rim = true; ctx.sfx('rim'); }
         _d.set(Pp.x - RIM.x, 0, Pp.z - RIM.z); const L = _d.length() || 1e-4;
         _q.copy(RIM).addScaledVector(_d, RR / L); _n.copy(Pp).sub(_q); const dist = _n.length();
         if (dist < BR + 0.011) {
-          _n.divideScalar(dist || 1); Pp.copy(_q).addScaledVector(_n, BR + 0.012);
+          _n.divideScalar(dist || 1); Pp.copy(_q).addScaledVector(_n, BR + 0.012); st.rim = true;
           const vn = st.v.dot(_n); if (vn < 0) { st.v.addScaledVector(_n, -1.55 * vn).multiplyScalar(0.82); if (vn < -0.5) { ctx.sfx('rim'); netK = Math.max(netK, 0.3); } }
         }
         if (!st.scored && st.v.y < 0 && prevY >= RIM.y && Pp.y < RIM.y && L < RR - BR * 0.3) score();
         if (st.inNet > 0) { st.inNet -= h; st.v.x *= 0.9; st.v.z *= 0.9; st.v.y = Math.max(st.v.y, -2.5); Pp.x = lerp(Pp.x, RIM.x, 0.1); Pp.z = lerp(Pp.z, RIM.z, 0.1); }
         if (Pp.y < BR) { Pp.y = BR; if (st.v.y < -1 && st.t - st.lastBounce > 0.15) { ctx.sfx('bounce'); st.lastBounce = st.t; } st.v.y *= -0.72; st.v.x *= 0.85; st.v.z *= 0.85; }
       }
+      if (st.perfect && !st.slowed && Pp.distanceTo(RIM) < 1.4 && st.v.y < 0) { st.slowed = true; ctx.slowmo(0.5, 0.35); } // cámara lenta en el tiro perfecto
       ball.rotation.x -= dt * 8;
       st.t += dt;
       if (st.t > 2.8) {
         st.mode = 'rest';
-        if (!st.scored && running) { ctx.hint(st.fb); setTimeout(() => { if (running) startHint(); }, 1800); }
+        if (!st.scored && running) {
+          if (fire) { fire = false; ctx.pop('SE APAGÓ EL FUEGO', 'bad'); drawBoard(); }
+          streak = 0; info();
+          ctx.hint(st.perfect ? '¡Casi! Rebotó en el aro. ¡Otra vez!' : st.err < 0 ? 'Soltaste muy pronto ⏳ espera a que la marca llegue al <b>VERDE</b>' : 'Soltaste muy tarde ⏩ suelta cuando la marca esté en el <b>VERDE</b>');
+          setTimeout(() => { if (running) startHint(); }, 2400);
+        }
       }
     },
-    dispose() { alive = false; running = false; }
+    dispose() { alive = false; running = false; meterEl.classList.add('hidden'); }
   };
 }
 
 /* ================= Catálogo de destinos ================= */
 export const GAMES = {
   orlando: {
-    short: 'Orlando', title: '🏰 Orlando — Duelo mágico', winMsg: '¡Has conquistado Orlando!', create: orlando,
+    short: 'Orlando', title: '🏰 Orlando — Duelo mágico', pix: 'DUELO MÁGICO', tag: 'ORLANDO · PARQUE MÁGICO', winMsg: '¡Has conquistado Orlando!', create: orlando,
     how: h => h
       ? 'Tu varita sigue tu <b>dedo índice</b>. Apunta al mago y mantén el dedo sobre él: el hechizo se lanza solo. Muestra la <b>palma abierta ✋</b> para activar 🛡️ Protego cuando veas el brillo verde. Cambia de hechizo dejando el dedo quieto sobre los botones. <b>Acierta 6 ataques</b> (a la mitad el mago se enfurece y ataca más rápido).'
       : 'Toca al mago para lanzarle el hechizo (o usa ✨ Lanzar). 🔴 Expelliarmus lo desarma y ⚡ Stupefy lo aturde. Cuando veas el brillo verde, elige 🛡️ Protego y lánzalo. Gira el celular o arrastra para mirar el parque. <b>Acierta 6 ataques</b> (a la mitad el mago se enfurece y ataca más rápido).',
@@ -1847,10 +1936,12 @@ export const GAMES = {
     fact: 'Florida es conocida como “The Sunshine State” (el Estado del Sol). Recorriste Miami Beach, los Everglades, la Overseas Highway de los Cayos y la Costa Espacial.'
   },
   heat: {
-    short: 'Miami Heat', title: '🏀 Miami Heat — Basketball AR', winMsg: '¡Eres una estrella del Miami Heat!', create: heat,
-    how: h => (h
-      ? 'Estás en la línea de tiro libre. El balón sigue tu <b>dedo índice</b>: súbelo rápido hacia la canasta para lanzar.'
-      : 'Empiezas en la línea de tiro libre. Pon el dedo en la pantalla y <b>desliza hacia arriba</b>, hacia la canasta. La velocidad del deslizamiento es la fuerza y la inclinación es la dirección.') + ' Gira el celular para ver la arena. <b>Encesta 5 balones</b>: después de cada canasta cambias de posición (tiro libre, alas y más lejos).',
+    short: 'Miami Heat', title: '🏀 Miami Heat', pix: 'MIAMI HEAT', tag: 'BASKET ARCADE · 5 CANASTAS', countdown: true,
+    winMsg: '¡Eres una estrella del Miami Heat!', create: heat,
+    how: h => '<ol class="steps">' + (h
+      ? '<li><b>Driblar:</b> baja la mano rápido frente a la cámara de atrás.</li><li><b>Preparar:</b> sube la mano; el balón va arriba y se llena la barra.</li><li><b>Tirar:</b> lanza la mano hacia arriba cuando la marca esté en el <b>VERDE</b>.</li>'
+      : '<li><b>Driblar:</b> toca la pantalla. Cada bote seguido agranda la zona verde.</li><li><b>Preparar:</b> mantén el dedo presionado; el balón sube y se llena la barra.</li><li><b>Tirar:</b> suelta cuando la marca esté en el <b>VERDE</b>. Desliza a un lado mientras sostienes para apuntar.</li>')
+      + '</ol><p>🔥 <b>3 canastas seguidas</b> = ¡EN LLAMAS! (más puntos). <b>Encesta 5</b> lo más rápido que puedas: tu tiempo te da medalla 🥇🥈🥉.</p>',
     fact: 'El Miami Heat entró a la NBA en 1988 como equipo de expansión y ha ganado tres campeonatos: 2006, 2012 y 2013.'
   }
 };

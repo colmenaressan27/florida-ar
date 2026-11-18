@@ -241,15 +241,32 @@ const SFX = {
   waves: () => noise(2.5, 0.05, 500, 0, 0.3),
   win: () => arp([523, 659, 784, 1047, 784, 1047, 1319], 0.11, 'triangle', 0.16),
   lose: () => arp([392, 330, 262, 196], 0.16, 'sawtooth', 0.1),
-  final: () => { arp([523, 659, 784, 1047, 1319, 1568, 2093], 0.1, 'square', 0.09); arp([262, 330, 392, 523], 0.2, 'triangle', 0.15); }
+  final: () => { arp([523, 659, 784, 1047, 1319, 1568, 2093], 0.1, 'square', 0.09); arp([262, 330, 392, 523], 0.2, 'triangle', 0.15); },
+  // ---- capa arcade (melodías originales de 8 bits) ----
+  coin: () => { tone(880, 0.07, 'square', 0.07); tone(1760, 0.28, 'square', 0.06, 0, 0.07); noise(0.25, 0.05, 6000, 0.07); },
+  stage: () => { // «entrando a un videojuego»: barrido, arpegio y acorde final
+    tone(160, 0.45, 'sawtooth', 0.05, 900); noise(0.45, 0.06, 2500, 0, 0.6);
+    [392, 494, 587, 784, 988, 1175].forEach((f, i) => tone(f, 0.12, 'square', 0.06, 0, 0.32 + i * 0.065));
+    for (const f of [784, 988, 1175]) tone(f, 0.5, 'triangle', 0.08, 0, 0.75);
+    tone(98, 0.6, 'square', 0.05, 0, 0.75);
+  },
+  tick: () => tone(523, 0.12, 'square', 0.07),
+  go: () => { tone(1047, 0.35, 'square', 0.07); tone(1319, 0.35, 'square', 0.05); tone(262, 0.35, 'triangle', 0.1); },
+  perfect: () => arp([1047, 1319, 1568, 2093], 0.045, 'square', 0.06),
+  fire: () => { noise(0.9, 0.18, 500, 0, 0.5); arp([392, 523, 659, 784, 1047], 0.06, 'sawtooth', 0.05); },
+  dribble: () => { tone(120 * (0.95 + Math.random() * 0.1), 0.1, 'sine', 0.28, 65); noise(0.05, 0.08, 900); },
+  buzzer: () => tone(180, 0.7, 'square', 0.08, 170)
 };
 const sfx = n => { if (S.sound && ac) try { SFX[n](); } catch (e) {} };
 
 /* ================= Interfaz ================= */
 function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('show', s.id === id)); }
-function card(title, html, btns) {
+// La fuente pixel no trae letras con tilde: en los textos pixel se quitan las tildes (la ñ se conserva), como en las máquinas arcade.
+const pxText = s => String(s).normalize('NFD').replace(/[̀-̂̄-ͯ]/g, '').normalize('NFC');
+function card(title, html, btns, kind = '') { // tarjeta (ventana) con título pixel; kind: '' | 'win' | 'lose' | 'how'
   const c = $('card');
-  c.querySelector('h2').textContent = title;
+  c.dataset.kind = kind;
+  c.querySelector('h2').textContent = pxText(title);
   c.querySelector('.body').innerHTML = html;
   const box = c.querySelector('.btns'); box.innerHTML = '';
   btns.forEach(b => {
@@ -258,37 +275,79 @@ function card(title, html, btns) {
     el.onclick = () => { requestGyro(); audioInit(); c.classList.remove('show'); sfx('click'); b.fn && b.fn(); };
     box.appendChild(el);
   });
-  c.classList.add('show');
+  c.classList.remove('show'); void c.offsetWidth; c.classList.add('show'); // reinicia la animación de entrada
+}
+
+/* ================= Capa arcade: título pixel, cuenta regresiva, mensajes, sacudida y cámara lenta ================= */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const store = { get: (k, d) => { try { const v = localStorage.getItem('fl_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem('fl_' + k, JSON.stringify(v)); } catch (e) {} } };
+S.fx = store.get('fx', !reduceMotion); // false = «Reducir efectos» (sin sacudidas ni cámara lenta)
+let stageT = null;
+function stageTitle(key) { // título pixel al entrar a cada minijuego + jingle de «entrar al videojuego»
+  const G = GAMES[key], n = ORDER.findIndex(([k]) => k === key) + 1, st = $('stage');
+  st.querySelector('.stage-n').textContent = `STAGE ${n}`;
+  st.querySelector('.stage-t').textContent = pxText(G.pix || G.short.toUpperCase());
+  st.querySelector('.stage-s').textContent = pxText(G.tag || '');
+  st.classList.remove('hidden', 'out'); void st.offsetWidth; st.classList.add('in');
+  sfx('stage'); if (navigator.vibrate) navigator.vibrate([20, 60, 30]);
+  clearTimeout(stageT); stageT = setTimeout(hideStage, 2400);
+}
+function hideStage() { const st = $('stage'); if (st.classList.contains('hidden')) return; st.classList.add('out'); clearTimeout(stageT); stageT = setTimeout(() => st.classList.add('hidden'), 320); }
+$('stage').onclick = hideStage;
+function countdown(cb) { // 3 · 2 · 1 · ¡YA!
+  const el = $('count'); let n = 3;
+  const step = () => {
+    el.textContent = n > 0 ? String(n) : '¡YA!'; el.classList.remove('hidden', 'bump'); void el.offsetWidth; el.classList.add('bump');
+    sfx(n > 0 ? 'tick' : 'go');
+    if (n-- > 0) setTimeout(step, 620); else setTimeout(() => { el.classList.add('hidden'); cb(); }, 450);
+  };
+  step();
+}
+function pop(text, kind = 'good') { // mensaje pixel en el centro: «¡PERFECTO!», «+3», «¡EN LLAMAS!»…
+  const el = document.createElement('div'); el.className = 'pop ' + kind; el.textContent = pxText(text);
+  $('pops').appendChild(el); setTimeout(() => el.remove(), 1150);
+}
+const trauma = { v: 0 }, slow = { t: 0, k: 1 };
+const shake = a => { if (S.fx) trauma.v = Math.min(1, trauma.v + a); };
+const slowmo = (dur, k) => { if (S.fx) { slow.t = dur; slow.k = k; } };
+function best(key, value, lowerIsBetter = false) { // guarda el récord de cada juego en este celular; devuelve si es nuevo récord
+  const old = store.get('best_' + key, null), isNew = old === null || (lowerIsBetter ? value < old : value > old);
+  if (isNew) store.set('best_' + key, value);
+  return { isNew, best: isNew ? value : old };
 }
 let toastT;
 function toast(msg, ms = 3000) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), ms); }
 function setInfo(t) { $('info').innerHTML = t || ''; $('info').classList.toggle('hidden', !t); }
 function setHint(t) { $('hint').innerHTML = t || ''; $('hint').classList.toggle('hidden', !t); }
-function flash() { const f = $('flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on'))); }
+function flash(kind = 'red') { const f = $('flash'); f.className = kind; f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on'))); }
 function fade(on) { $('fade').classList.toggle('on', on); }
 const NAMES = ORDER;
-function updateStars() {
+function updateStars() { // barra de progreso: ⭐ n/7 y un punto por destino
   const n = ORDER.filter(([k]) => S.stars[k]).length;
-  $('stars').innerHTML = `<span class="chip ${n === 7 ? 'got' : ''}">⭐ ${n}/7</span>` + ORDER.map(([k, i]) => `<span class="chip mini ${S.stars[k] ? 'got' : ''}" title="${GAMES[k].short}">${i}${S.stars[k] ? '⭐' : ''}</span>`).join('');
+  $('stars').innerHTML = `<span class="prog ${n === 7 ? 'got' : ''}" aria-label="${n} de 7 estrellas">⭐ <b>${n}</b>/7</span>` + ORDER.map(([k, i]) => `<span class="dot ${S.stars[k] ? 'got' : ''}" title="${GAMES[k].short}${S.stars[k] ? ' — completado' : ''}">${i}</span>`).join('');
 }
 function refreshTools() {
   $('bBack').style.visibility = S.key && S.key !== 'hub' ? 'visible' : 'hidden';
   $('bCenter').classList.toggle('hidden', !gyro.on);
   $('bGyro').classList.toggle('hidden', !gyro.avail);
-  $('bGyro').classList.toggle('off', !gyro.on);
-  $('bSound').textContent = S.sound ? '🔊' : '🔇';
+  $('bGyro').querySelector('span').textContent = gyro.on ? 'Sensor de movimiento: activado' : 'Sensor de movimiento: apagado';
+  $('bFx').querySelector('span').textContent = S.fx ? 'Efectos: completos' : 'Efectos: reducidos';
+  $('bRestart').querySelector('span').textContent = S.key && S.key !== 'hub' ? 'Reiniciar este juego' : 'Reiniciar la aventura';
+  $('bSound').textContent = S.sound ? '🔊' : '🔇'; $('bSound').setAttribute('aria-label', S.sound ? 'Silenciar' : 'Activar sonido');
 }
 
-/* ================= Recuadro con la cámara: te ves el pie o el dedo mientras juegas ================= */
-// Se muestra dentro de los mundos cuando juegas con el dedo índice o con el pie. Tócalo para agrandarlo; 📷 lo oculta.
-const pip = { on: false, pref: true, big: false, pts: [], t: 0, flash: 0, want: null };
-function pipWanted() { return S.cam && !!video.srcObject && !!S.key && S.key !== 'hub' && (footMode || (S.mode === 'hand' && handsOn)); }
+/* ================= Recuadro con la cámara: te ves la mano mientras juegas ================= */
+// Aparece dentro de los mundos cuando juegas con el dedo índice. Tócalo para agrandarlo; ✕ lo oculta y «📷 Cámara» lo vuelve a mostrar.
+const pip = { on: false, pref: store.get('pip', true), big: false, pts: [], t: 0, flash: 0, want: null };
+function pipWanted() { return S.cam && !!video.srcObject && !!S.key && S.key !== 'hub' && S.mode === 'hand' && handsOn && !footMode; }
 function updatePip() {
   const want = pipWanted(); pip.want = want;
-  $('bPip').classList.toggle('hidden', !want); $('bPip').classList.toggle('off', !pip.pref);
+  $('bPip').classList.toggle('hidden', !want); $('bPip').setAttribute('aria-pressed', String(pip.pref));
   pip.on = want && pip.pref;
   $('pip').classList.toggle('hidden', !pip.on); $('pip').classList.toggle('big', pip.big);
+  $('pipShow').classList.toggle('hidden', !(want && !pip.pref));
 }
+function setPipPref(v) { pip.pref = v; store.set('pip', v); updatePip(); }
 function setStat(text, level) { // texto bajo el recuadro y color del borde: verde = listo, amarillo = casi, rojo = no te ve
   const f = $('footstat'); if (f.textContent !== text) f.textContent = text;
   const p = $('pip'); for (const k of ['good', 'mid', 'bad']) p.classList.toggle(k, k === level);
@@ -312,62 +371,94 @@ function drawPip(now) {
     g.lineWidth = 3 * dpr; g.strokeStyle = '#ffd54a'; g.stroke();
   }
 }
-$('pip').onclick = () => { pip.big = !pip.big; updatePip(); };
-$('bPip').onclick = () => { sfx('click'); pip.pref = !pip.pref; updatePip(); toast(pip.pref ? '📷 Recuadro de cámara visible' : '📷 Recuadro de cámara oculto', 1500); };
+$('pipCv').onclick = () => { pip.big = !pip.big; updatePip(); };
+$('pipHide').onclick = e => { e.stopPropagation(); sfx('click'); setPipPref(false); };
+$('pipShow').onclick = () => { sfx('click'); setPipPref(true); };
+$('bPip').onclick = () => { sfx('click'); setPipPref(!pip.pref); };
 
 /* ================= Pantalla siempre encendida (para jugar con el celular apoyado) ================= */
 let wake = null;
 async function keepAwake() { try { if ('wakeLock' in navigator && !wake && document.visibilityState === 'visible') { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => (wake = null)); } } catch (e) {} }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.key) keepAwake(); });
 
-/* ================= Patear con el pie (MediaPipe Pose + detector de patadas de footTracking.js) ================= */
-let footMode = false, footOn = false, footSeen = 0, footWarned = false, footCam = false, gyroBeforeFoot = false;
-async function beginFoot(side) {
-  foot.side = side; if (handsOn) { stopHands(); handsOn = false; hand.present = false; $('cursor').style.opacity = 0; }
-  footMode = true; pip.pts = []; updatePip(); keepAwake();
-  // en celular se usa la cámara frontal: apoyas el teléfono y te alejas para que se vea tu cuerpo completo
-  if (isMobile) { try { await startCamera('user'); footCam = true; } catch (e) {} }
-  // con el celular apoyado la vista 3D queda fija: el sensor de movimiento se apaga mientras pateas
+/* ================= Patear con la cámara TRASERA: tu piso real abajo y el estadio 3D arriba ================= */
+// Sostienes el celular apuntando a tus pies. La franja de abajo muestra tu piso (video de la cámara) con el balón encima.
+// Pateas a través del balón y sale volando hacia el estadio. La patada se detecta por movimiento (footTracking.js).
+// F = alto de la franja (fracción de la pantalla) · BALL_Y = altura del balón en pantalla (-1 abajo, 1 arriba).
+const FLOOR = { F: 0.46, D: 1.2, BALL_D: 0.95, BALL_Y: -0.6, BALL_R: 0.11 };
+let footMode = false, gyroBeforeFoot = false, floorMesh = null, floorTex = null, floorFlash = 0;
+const floorGeo = { cx: 0, cy: 0, r: 0 };
+function floorBuild() {
+  if (floorMesh) return;
+  floorTex = new THREE.VideoTexture(video); floorTex.colorSpace = THREE.SRGBColorSpace;
+  const fc = document.createElement('canvas'); fc.width = 4; fc.height = 128;
+  const fg = fc.getContext('2d'), gr = fg.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#000'); gr.addColorStop(0.24, '#fff'); gr.addColorStop(1, '#fff');
+  fg.fillStyle = gr; fg.fillRect(0, 0, 4, 128);
+  floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: floorTex, alphaMap: new THREE.CanvasTexture(fc), transparent: true, toneMapped: false, fog: false }));
+  floorMesh.renderOrder = 10; floorMesh.frustumCulled = false; floorMesh.visible = false; camera.add(floorMesh);
+}
+function floorLayout() { // tamaño de la franja y recorte del video (como «cover»), y dónde queda el balón en pantalla
+  if (!floorMesh) return;
+  const th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hh = th * FLOOR.D, hw = hh * camera.aspect;
+  floorMesh.scale.set(2 * hw, 2 * hh * FLOOR.F, 1); floorMesh.position.set(0, -hh + hh * FLOOR.F, -FLOOR.D);
+  const vw = video.videoWidth || 16, vh = video.videoHeight || 9, As = camera.aspect / FLOOR.F, Av = vw / vh;
+  let rx = 1, ry = 1; if (Av > As) rx = As / Av; else ry = Av / As;
+  floorTex.repeat.set(S.mirror ? -rx : rx, ry); floorTex.offset.set(S.mirror ? (1 + rx) / 2 : (1 - rx) / 2, (1 - ry) / 2);
+  floorGeo.cx = innerWidth / 2; floorGeo.cy = (1 - FLOOR.BALL_Y) / 2 * innerHeight; floorGeo.r = FLOOR.BALL_R / (FLOOR.BALL_D * th) * innerHeight / 2;
+  const ring = $('ring'), d = floorGeo.r * 2.5;
+  ring.style.width = ring.style.height = d + 'px'; ring.style.transform = `translate(${floorGeo.cx - d / 2}px,${floorGeo.cy - d / 2}px)`;
+  $('floorUi').style.top = (innerHeight * (1 - FLOOR.F) + 6) + 'px';
+}
+function floorZone(vw, vh) { // zona del balón en píxeles del video (para el detector)
+  const W = innerWidth, H = innerHeight, FH = H * FLOOR.F, s = Math.max(W / vw, FH / vh);
+  const ox = (W - vw * s) / 2, oy = H - FH + (FH - vh * s) / 2;
+  let x = (floorGeo.cx - ox) / s; if (S.mirror) x = vw - x;
+  return { x, y: (floorGeo.cy - oy) / s, r: floorGeo.r / s * 1.15 };
+}
+const _fb = new THREE.Vector3();
+function floorBall(out = _fb) { // posición del balón «sobre tu piso» en el mundo 3D
+  const th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  return camera.localToWorld(out.set(0, FLOOR.BALL_Y * th * FLOOR.BALL_D, -FLOOR.BALL_D));
+}
+function setFloorMsg(t) { const m = $('floorMsg'); if (m.textContent !== t) m.textContent = t; }
+async function beginFoot() {
+  if (!S.cam || !video.srcObject) { toast('Para patear con el pie necesitas la cámara. Juega deslizando el dedo.', 4000); startScene(); return; }
+  if (handsOn) { stopHands(); handsOn = false; hand.present = false; $('cursor').style.opacity = 0; }
+  footMode = true; updatePip(); keepAwake();
+  // apuntas el celular a tus pies: la vista 3D queda fija (el sensor de movimiento se apaga mientras pateas)
   if (gyro.on) { gyroBeforeFoot = true; gyro.on = false; } lookReset(look.yaw, 0); refreshTools();
-  toast('Cargando detector de pies…', 15000); setStat('⏳ Cargando detector de pies…', 'mid');
-  try {
-    await startFoot(video, onFoot); footOn = true; footSeen = performance.now(); footWarned = false; $('footbar').classList.remove('hidden');
-    toast('✅ Detector de pies listo', 1500);
-    card('🦶 Cómo patear con tu pie', `<p>1️⃣ ${isMobile ? '<b>Apoya el celular</b> de pie (contra algo, en el piso o en una silla), con la pantalla hacia ti.' : 'Ponte <b>frente a la cámara web</b>.'}<br>2️⃣ <b>Aléjate 2 o 3 pasos</b> hasta verte <b>de cuerpo entero</b> en el recuadro de la cámara, con los zapatos incluidos y buena luz.<br>3️⃣ Verás un <b>punto amarillo</b> en la punta de tu zapato. Cuando el borde del recuadro se ponga <b>verde</b>, estás listo.<br>4️⃣ Quédate quieto un segundo y <b>patea hacia ${isMobile ? 'el celular' : 'la pantalla'}</b>. Para apuntar, patea un poco hacia la izquierda o la derecha.</p><p class="small">Toca el recuadro para agrandarlo o achicarlo. Si no cuenta tus patadas, toca «Sensib.» para subir la sensibilidad.</p>`, [{ label: '¡Entendido!', primary: true }]);
-  } catch (e) { console.warn(e); setStat('🔴 No se pudo activar el detector', 'bad'); toast('No se pudo activar el detector de pies. Juega deslizando el dedo.', 5000); }
-  S.scene && S.scene.start();
+  floorBuild(); floorMesh.visible = true; floorLayout();
+  document.body.classList.add('floor'); $('floorUi').classList.remove('hidden'); $('ring').classList.remove('hidden');
+  setFloorMsg('🟡 Pon el pie detrás del balón…');
+  startFoot(video, floorZone, onFoot);
+  card('🦶 PATEA DE VERDAD', `<ol class="steps"><li><b>Sostén el celular</b> con la cámara de atrás apuntando a tus pies.</li><li>Abajo verás <b>tu piso con el balón encima</b>. Pon un pie justo detrás del balón.</li><li>Cuando el aro del balón se ponga <b>verde</b>, <b>¡patea a través del balón!</b> Para apuntar, patea un poco hacia la izquierda o la derecha.</li></ol><p class="small">¿No cuenta tus patadas? Toca «⚡ Sensib.». También puedes deslizar el dedo hacia arriba.</p>`, [{ label: '¡A PATEAR!', primary: true, fn: startScene }], 'how');
 }
 function endFoot() {
-  const was = footMode; footMode = false; pip.pts = [];
-  if (footOn) { footOn = false; stopFoot(); }
-  $('footbar').classList.add('hidden');
+  const was = footMode; footMode = false; stopFoot();
+  if (floorMesh) floorMesh.visible = false;
+  document.body.classList.remove('floor'); $('floorUi').classList.add('hidden'); $('ring').classList.add('hidden');
   if (!was) { updatePip(); return; }
-  pip.big = false; setStat('', null);
   if (gyroBeforeFoot) { gyroBeforeFoot = false; gyro.on = true; recenter(); refreshTools(); }
-  if (footCam) { footCam = false; if (S.cam) startCamera('environment').catch(() => {}); }
   if (S.mode === 'hand' && !handsOn) startHands(video, onHand).then(() => { handsOn = true; updatePip(); }).catch(() => {});
   updatePip();
 }
 function onFoot(r) {
-  if (!footOn) return;
-  const now = performance.now();
-  pip.pts = r.present ? [{ x: r.x, y: r.y, t: now }] : [];
-  if (!r.present) { setStat(r.body ? '🟡 Veo tu cuerpo, pero no tus zapatos: aléjate un poco' : '🔴 No te veo: aléjate hasta verte de cuerpo entero', r.body ? 'mid' : 'bad'); return; }
-  footSeen = now;
-  if (r.kick && S.scene && S.scene.kick && !blocked()) {
-    if (navigator.vibrate) navigator.vibrate(30);
-    S.scene.kick({ pw: r.kick.pw, lat: r.kick.lat }); pip.flash = now; setStat('⚡ ¡Patada!', 'good'); return;
+  if (!footMode) return;
+  const now = performance.now(), ring = $('ring');
+  if (r.kick && S.scene && S.scene.kick && !blocked() && (!S.scene.canKick || S.scene.canKick())) {
+    if (navigator.vibrate) navigator.vibrate(40);
+    S.scene.kick({ pw: r.kick.pw, lat: r.kick.lat }); floorFlash = now; ring.dataset.st = 'kick'; setFloorMsg('⚡ ¡PATADA!'); return;
   }
-  if (now - pip.flash > 900) setStat(r.ready ? '🟢 ¡Listo! Patea hacia ' + (isMobile ? 'el celular' : 'la pantalla') : '🟡 Quédate quieto un segundo…', r.ready ? 'good' : 'mid');
+  if (now - floorFlash < 900) return;
+  const st = r.ready ? 'good' : r.still === false ? 'move' : 'mid';
+  ring.dataset.st = st;
+  setFloorMsg(st === 'good' ? '🟢 ¡Listo! Patea el balón' : st === 'move' ? '📱 Sostén el celular quieto' : '🟡 Pon el pie detrás del balón…');
 }
-setInterval(() => { if (footOn && !footWarned && performance.now() - footSeen > 7000) { footWarned = true; toast('No veo tu pie 🦶 Aléjate hasta verte de cuerpo entero en el recuadro, con buena luz, o vuelve con ← y elige "deslizar el dedo".', 6000); } }, 2000);
-$('fUp').onclick = () => { foot.ext = Math.min(0.9, foot.ext + 0.1); toast('Punto más hacia la punta', 1200); };
-$('fDn').onclick = () => { foot.ext = Math.max(-0.2, foot.ext - 0.1); toast('Punto más hacia el talón', 1200); };
 const SENS = [[1, 'normal'], [1.6, 'alta'], [0.7, 'baja']];
 $('fSens').onclick = () => {
   const i = (SENS.findIndex(([v]) => v === foot.sens) + 1) % SENS.length; foot.sens = SENS[i][0];
-  $('fSens').textContent = 'Sensib.: ' + SENS[i][1];
-  toast(['Sensibilidad normal', 'Sensibilidad alta: basta una patada suave', 'Sensibilidad baja: solo patadas fuertes'][i], 1800);
+  $('fSens').textContent = '⚡ Sensib.: ' + SENS[i][1];
+  toast(['Sensibilidad normal', 'Sensibilidad alta: basta un toque suave', 'Sensibilidad baja: solo patadas fuertes'][i], 1800);
 };
 
 /* ================= Escenas ================= */
@@ -377,8 +468,9 @@ const ctx = {
   burst: (p, c, n, sp) => sparks.emit(p, c, n, sp),
   isHand: () => S.mode === 'hand',
   handVisible: () => S.mode === 'hand' && hand.present,
-  gyroOn: () => gyro.on && !!gyro.data, gyroData: () => gyro.data, GAMES, audio: () => (S.sound && ac ? ac : null), footOn: () => footOn,
-  enter: (k, o) => enter(k, o), win: k => win(k), lose: m => lose(m), ready: () => ready()
+  gyroOn: () => gyro.on && !!gyro.data, gyroData: () => gyro.data, GAMES, audio: () => (S.sound && ac ? ac : null),
+  footOn: () => footMode, floorBall: o => floorBall(o), pop, shake, slowmo, best, fx: () => S.fx,
+  enter: (k, o) => enter(k, o), win: (k, st) => win(k, st), lose: m => lose(m), ready: () => ready()
 };
 let winStar = null, winT = 0;
 function enter(key, opt = {}) {
@@ -387,44 +479,52 @@ function enter(key, opt = {}) {
     if (S.scene && S.scene.dispose) S.scene.dispose();
     if (!GAMES[key] || !GAMES[key].foot) endFoot();
     for (const c of [...root.children]) { root.remove(c); disposeTree(c); }
-    scene.fog = null; winStar = null; drag = null; dwell.key = null;
-    setInfo(''); setHint(''); $('crosshair').classList.add('hidden'); $('arrow').classList.add('hidden');
+    scene.fog = null; winStar = null; drag = null; dwell.key = null; trauma.v = 0; slow.t = 0;
+    setInfo(''); setHint(''); $('crosshair').classList.add('hidden'); $('arrow').classList.add('hidden'); $('meter').classList.add('hidden');
     camera.position.set(0, EYE, 0); lookReset(0, 0); setPtr(innerWidth / 2, innerHeight / 2, 'touch');
     S.key = key; refreshTools();
     document.body.classList.toggle('world', key !== 'hub');
     S.scene = key === 'hub' ? createHub(ctx, opt) : GAMES[key].create(ctx, opt);
     fade(false);
-    if (key !== 'hub' && opt.quick) S.scene.start();
+    if (key === 'hub') hideStage();
+    else if (opt.quick) startScene();
+    else stageTitle(key); // título pixel + jingle mientras pasa la intro de cámara
   }, 280);
+}
+function startScene() { // algunos juegos empiezan con cuenta regresiva 3-2-1-¡YA!
+  const sc = S.scene, G = GAMES[S.key]; if (!sc) return;
+  hideStage();
+  if (G && G.countdown) countdown(() => { if (S.scene === sc) sc.start(); }); else sc.start();
 }
 function ready() { // la escena terminó su intro: mostrar instrucciones
   const G = GAMES[S.key];
   const play = G.foot ? [
-    ...(S.cam ? [{ label: '🦶 Patear con el pie derecho', primary: true, fn: () => beginFoot('right') }, { label: '🦶 Patear con el pie izquierdo', fn: () => beginFoot('left') }] : []),
-    { label: S.mode === 'hand' ? '☝️ Jugar con tu dedo índice' : '👆 Jugar deslizando el dedo', primary: !S.cam, fn: () => { endFoot(); S.scene.start(); } }
-  ] : [{ label: '¡Jugar!', primary: true, fn: () => S.scene.start() }];
+    ...(S.cam ? [{ label: '🦶 Patear con mi pie (cámara)', primary: true, fn: () => beginFoot() }] : []),
+    { label: S.mode === 'hand' ? '☝️ Jugar con mi dedo índice' : '👆 Jugar deslizando el dedo', primary: !S.cam, fn: () => { endFoot(); startScene(); } }
+  ] : [{ label: '▶ ¡A JUGAR!', primary: true, fn: startScene }];
   card(G.title, `<p>${G.how(S.mode === 'hand')}</p>`, [
     ...play,
     { label: 'Volver a los destinos', fn: () => enter('hub', { opened: true }) }
-  ]);
+  ], 'how');
 }
-function win(key) {
+const MEDAL = { oro: ['🥇', 'ORO'], plata: ['🥈', 'PLATA'], bronce: ['🥉', 'BRONCE'] };
+function win(key, st = {}) { // st (opcional): { medal: 'oro'|'plata'|'bronce', line: 'texto de estadísticas', record: 'texto de récord' }
   const G = GAMES[key];
-  S.stars[key] = 1; updateStars(); sfx('win');
+  S.stars[key] = 1; updateStars(); sfx('win'); shake(0.25);
   winStar = starMesh(); winStar.position.copy(camera.localToWorld(new THREE.Vector3(0, 0.1, -2.2))); winStar.scale.setScalar(0.01); root.add(winStar); winT = 0;
   sparks.emit(winStar.position, [0xffd700, 0xffffff, 0xff9d00], 80, 2);
   setTimeout(() => {
-    const all = NAMES.every(([k]) => S.stars[k]);
-    card(G.winMsg, `<div class="bigstar">⭐</div><p><b>¡Estrella de ${G.short} desbloqueada!</b></p><p class="fact">💡 ${G.fact}</p>`,
-      [{ label: all ? 'Ver final 🎉' : 'Continuar', primary: true, fn: () => all ? finale() : enter('hub', { opened: true }) }]);
+    const all = NAMES.every(([k]) => S.stars[k]), m = MEDAL[st.medal];
+    card('¡NIVEL SUPERADO!', `${m ? `<div class="medal ${st.medal}"><span>${m[0]}</span><b>${m[1]}</b></div>` : '<div class="bigstar">⭐</div>'}<p class="win-t">${G.winMsg}</p>${st.line ? `<p class="stats">${st.line}</p>` : ''}${st.record ? `<p class="record">${pxText(st.record)}</p>` : ''}<p>⭐ <b>¡Estrella de ${G.short} desbloqueada!</b></p><p class="fact">💡 ${G.fact}</p>`,
+      [{ label: all ? 'Ver final 🎉' : 'Continuar', primary: true, fn: () => all ? finale() : enter('hub', { opened: true }) }, { label: '↻ Jugar otra vez', fn: () => enter(key, { quick: true }) }], 'win');
   }, 1600);
 }
 function lose(msg) {
   sfx('lose');
-  card('¡Inténtalo de nuevo!', `<p>${msg}</p>`, [
-    { label: 'Reintentar', primary: true, fn: () => enter(S.key, { quick: true }) },
+  card('¡CASI!', `<div class="bigstar">💪</div><p>${msg}</p>`, [
+    { label: '↻ Reintentar', primary: true, fn: () => enter(S.key, { quick: true }) },
     { label: 'Volver a los destinos', fn: () => enter('hub', { opened: true }) }
-  ]);
+  ], 'lose');
 }
 function finale() {
   enter('hub', { opened: true });
@@ -434,8 +534,8 @@ function finale() {
       sparks.emit(camera.localToWorld(new THREE.Vector3(Math.random() * 1.6 - 0.8, Math.random() * 1.2 - 0.3, -2.5)), [0xff4fa3, 0xffd54a, 0x24d1ff, 0x7bff6a, 0xff3b30], 40, 2.2);
       if (++n > 14) clearInterval(iv);
     }, 180);
-    card('¡FELICIDADES! HAS COMPLETADO TU TOUR POR FLORIDA', '<div class="bigstar">⭐⭐⭐⭐⭐⭐⭐</div><p>Visitaste los parques de Orlando, recorriste Miami por tierra y por agua, y jugaste baloncesto, fútbol americano y fútbol.</p>',
-      [{ label: 'Volver a jugar', primary: true, fn: replay }]);
+    card('¡FELICIDADES!', '<p class="win-t">HAS COMPLETADO TU TOUR POR FLORIDA</p><div class="bigstar">⭐⭐⭐⭐⭐⭐⭐</div><p>Visitaste los parques de Orlando, recorriste Miami por tierra y por agua, y jugaste baloncesto, fútbol americano y fútbol.</p>',
+      [{ label: '↻ Volver a jugar', primary: true, fn: replay }], 'win');
   }, 400);
 }
 function replay() { for (const k in S.stars) S.stars[k] = 0; updateStars(); enter('hub'); }
@@ -456,7 +556,7 @@ async function startCamera(facing = isMobile ? 'environment' : 'user') {
 }
 
 /* ================= Flujo de pantallas ================= */
-$('bStart').onclick = () => { audioInit(); sfx('click'); show('perm'); };
+$('bStart').onclick = () => { audioInit(); sfx('coin'); flash('white'); show('perm'); };
 $('bCam').onclick = async () => {
   audioInit(); sfx('click');
   const err = $('camErr');
@@ -500,20 +600,28 @@ async function chooseMode(m) {
   if (S.scene && S.scene.refreshHint) S.scene.refreshHint();
 }
 
-/* ================= Botones de la barra superior ================= */
+/* ================= Barra superior y menú ⚙️ ================= */
+const menu = $('menu');
+function openMenu() { sfx('click'); refreshTools(); menu.classList.add('show'); setTimeout(() => $('menuClose').focus(), 50); }
+function closeMenu() { menu.classList.remove('show'); }
+$('bMenu').onclick = openMenu;
+$('menuClose').onclick = () => { sfx('click'); closeMenu(); };
+menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
 $('bBack').onclick = () => { sfx('click'); enter('hub', { opened: true }); };
 $('bSound').onclick = () => { audioInit(); S.sound = !S.sound; refreshTools(); sfx('click'); };
-$('bMode').onclick = () => { sfx('click'); goControls(); };
+$('bMode').onclick = () => { closeMenu(); sfx('click'); goControls(); };
 $('bRestart').onclick = () => {
-  sfx('click');
-  if (S.key === 'hub') card('¿Reiniciar la aventura?', '<p>Se borrarán tus estrellas y el cofre se cerrará.</p>', [{ label: 'Sí, reiniciar', primary: true, fn: replay }, { label: 'Cancelar' }]);
+  closeMenu(); sfx('click');
+  if (S.key === 'hub') card('¿REINICIAR?', '<p>Se borrarán tus estrellas y el cofre se cerrará.</p>', [{ label: 'Sí, reiniciar', primary: true, fn: replay }, { label: 'Cancelar' }]);
   else enter(S.key, { quick: true });
 };
-$('bCenter').onclick = () => { sfx('click'); lookReset(look.yaw, 0); toast('Vista centrada al frente 🎯', 1500); };
+$('bCenter').onclick = () => { closeMenu(); sfx('click'); lookReset(look.yaw, 0); toast('Vista centrada al frente 🎯', 1500); };
 $('bGyro').onclick = () => {
   requestGyro(); gyro.on = !gyro.on; lookReset(look.yaw, 0);
   refreshTools(); toast(gyro.on ? 'Movimiento activado: gira el celular para mirar alrededor' : 'Movimiento desactivado: arrastra el dedo para mirar', 2200);
 };
+$('bFx').onclick = () => { S.fx = !S.fx; store.set('fx', S.fx); refreshTools(); sfx('click'); toast(S.fx ? '✨ Efectos completos: sacudidas y cámara lenta' : 'Efectos reducidos: sin sacudidas ni cámara lenta', 2000); };
 
 /* ================= Bucle principal ================= */
 const clock = new THREE.Clock(); let T = 0;
@@ -527,19 +635,25 @@ renderer.setAnimationLoop(() => {
   }
   ptr.ray.setFromCamera(ptr.ndc, camera);
   updateDwell(dt);
-  if (S.scene && S.scene.update) S.scene.update(dt, T);
+  const sdt = slow.t > 0 ? dt * slow.k : dt; if (slow.t > 0) slow.t -= dt; // cámara lenta en momentos clave
+  if (S.scene && S.scene.update) S.scene.update(sdt, T);
+  if (trauma.v > 0) { // sacudida de cámara (trauma²): fuerte al golpe y se calma sola
+    const a = trauma.v * trauma.v * 0.035; camera.rotateX((Math.random() - 0.5) * a); camera.rotateY((Math.random() - 0.5) * a);
+    trauma.v = Math.max(0, trauma.v - dt * 1.6);
+  }
+  if (footMode) { floorLayout(); $('ring').classList.toggle('off', !!(S.scene && S.scene.canKick && !S.scene.canKick())); }
   if (winStar) {
     winT += dt;
     winStar.scale.setScalar(Math.min(1, winT * 2) * 0.9);
     winStar.position.y += dt * 0.15; winStar.rotation.y += dt * 4;
     if (Math.random() < 0.3) sparks.emit(winStar.position, 0xffd700, 2, 0.8);
   }
-  sparks.update(dt);
+  sparks.update(sdt);
   renderer.render(scene, camera);
   drawPip(performance.now());
 });
 updateStars();
-if (location.search.includes('debug')) window.__fl = { S, enter, ctx, camera, root, look };
+if (location.search.includes('debug')) window.__fl = { S, enter, ctx, camera, root, look, onFoot, beginFoot, startScene };
 
 // Calidad: bajo / medio / alto (resolución y sombras)
 function applyQuality(q) {
