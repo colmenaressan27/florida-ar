@@ -383,11 +383,16 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 /* ================= Patear con la cámara TRASERA: tu piso real abajo y el estadio 3D arriba ================= */
 // Sostienes el celular apuntando a tus pies. La franja de abajo muestra tu piso (video de la cámara) con el balón encima.
-// Pateas a través del balón y sale volando hacia el estadio. La patada se detecta por movimiento (footTracking.js).
-// F = alto de la franja (fracción de la pantalla) · BALL_Y = altura del balón en pantalla (-1 abajo, 1 arriba).
-const FLOOR = { F: 0.46, D: 1.2, BALL_D: 0.95, BALL_Y: -0.6, BALL_R: 0.11 };
+// El balón queda ANCLADO a un punto de tu piso (con el giroscopio): aunque muevas el celular, no se va de ese sitio.
+// Toca tu piso para poner el balón en otro lugar. La patada se detecta por movimiento (footTracking.js).
+// F = alto de la franja (fracción de la pantalla) · BALL_Y = dónde aparece el balón al colocarlo (-1 abajo, 1 arriba)
+// CAM_H = altura aproximada del celular sobre el piso (m) · FOV_LONG = ángulo de visión del lado largo de la cámara trasera
+// BALL_K = el balón se dibuja un poco más grande que uno real para que sea más fácil darle
+const FLOOR = { F: 0.46, D: 1.2, BALL_D: 0.95, BALL_Y: -0.56, BALL_R: 0.11, CAM_H: 1.2, FOV_LONG: 68, BALL_K: 1.3 };
 let footMode = false, gyroBeforeFoot = false, floorMesh = null, floorTex = null, floorFlash = 0;
 const floorGeo = { cx: 0, cy: 0, r: 0 };
+const anchor = { world: false, W: new THREE.Vector3(), seen: true, fx: 0.5, fy: (1 - FLOOR.BALL_Y) / 2 };
+const _aq = new THREE.Quaternion(), _ad = new THREE.Vector3(), _ac = new THREE.Vector3();
 function floorBuild() {
   if (floorMesh) return;
   floorTex = new THREE.VideoTexture(video); floorTex.colorSpace = THREE.SRGBColorSpace;
@@ -397,41 +402,78 @@ function floorBuild() {
   floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: floorTex, alphaMap: new THREE.CanvasTexture(fc), transparent: true, toneMapped: false, fog: false }));
   floorMesh.renderOrder = 10; floorMesh.frustumCulled = false; floorMesh.visible = false; camera.add(floorMesh);
 }
-function floorLayout() { // tamaño de la franja y recorte del video (como «cover»), y dónde queda el balón en pantalla
+function stripMap() { // cómo se ve el video dentro de la franja (recorte tipo «cover»)
+  const W = innerWidth, H = innerHeight, FH = H * FLOOR.F, vw = video.videoWidth || 720, vh = video.videoHeight || 1280, s = Math.max(W / vw, FH / vh);
+  return { W, H, FH, vw, vh, s, ox: (W - vw * s) / 2, oy: H - FH + (FH - vh * s) / 2 };
+}
+function camTan(m) { const tl = Math.tan(THREE.MathUtils.degToRad(FLOOR.FOV_LONG / 2)); return m.vw >= m.vh ? { tx: tl, ty: tl * m.vh / m.vw } : { tx: tl * m.vw / m.vh, ty: tl }; }
+function placeBallAt(sx, sy) { // ancla el balón al punto del piso que se ve en (sx, sy) de la pantalla
+  if (!gyro.data) return false;
+  const m = stripMap(), t = camTan(m);
+  let u = (sx - m.ox) / (m.vw * m.s); if (S.mirror) u = 1 - u;
+  const v = (sy - m.oy) / (m.vh * m.s);
+  const d = _ad.set((2 * u - 1) * t.tx, -(2 * v - 1) * t.ty, -1).normalize().applyQuaternion(gyroQ(_aq));
+  if (d.y > -0.22) return false; // el celular no está apuntando al piso
+  const k = FLOOR.CAM_H / -d.y; if (k > 4) return false; // demasiado lejos
+  anchor.W.copy(d).multiplyScalar(k).add(_ac.set(0, FLOOR.CAM_H, 0)); anchor.world = true; anchor.seen = true;
+  return true;
+}
+function anchorProject() { // dónde se ve ahora el balón anclado, según el giro actual del celular
+  const m = stripMap(), t = camTan(m);
+  const d = _ad.copy(anchor.W).sub(_ac.set(0, FLOOR.CAM_H, 0)), dist = d.length();
+  d.applyQuaternion(gyroQ(_aq).invert());
+  if (d.z > -0.05) return null;
+  let u = 0.5 + (d.x / -d.z) / (2 * t.tx); const v = 0.5 - (d.y / -d.z) / (2 * t.ty); if (S.mirror) u = 1 - u;
+  const x = m.ox + u * m.vw * m.s, y = m.oy + v * m.vh * m.s, r = FLOOR.BALL_K * (FLOOR.BALL_R / dist) / (2 * t.ty) * m.vh * m.s;
+  if (y < m.H - m.FH + r * 0.3 || y > m.H + r * 0.5 || x < -r * 0.5 || x > m.W + r * 0.5) return null; // fuera de la franja del piso
+  return { cx: x, cy: y, r };
+}
+function floorReset() { // pone el balón frente a ti (al empezar y en cada intento)
+  if (!placeBallAt(innerWidth / 2, anchor.fy * innerHeight)) { anchor.world = false; anchor.fx = 0.5; anchor.fy = (1 - FLOOR.BALL_Y) / 2; }
+}
+function floorLayout() { // tamaño de la franja, recorte del video y dónde se ve el balón
   if (!floorMesh) return;
   const th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hh = th * FLOOR.D, hw = hh * camera.aspect;
   floorMesh.scale.set(2 * hw, 2 * hh * FLOOR.F, 1); floorMesh.position.set(0, -hh + hh * FLOOR.F, -FLOOR.D);
   const vw = video.videoWidth || 16, vh = video.videoHeight || 9, As = camera.aspect / FLOOR.F, Av = vw / vh;
   let rx = 1, ry = 1; if (Av > As) rx = As / Av; else ry = Av / As;
   floorTex.repeat.set(S.mirror ? -rx : rx, ry); floorTex.offset.set(S.mirror ? (1 + rx) / 2 : (1 - rx) / 2, (1 - ry) / 2);
-  floorGeo.cx = innerWidth / 2; floorGeo.cy = (1 - FLOOR.BALL_Y) / 2 * innerHeight; floorGeo.r = FLOOR.BALL_R / (FLOOR.BALL_D * th) * innerHeight / 2;
+  if (anchor.world && gyro.data) { const p = anchorProject(); anchor.seen = !!p; if (p) Object.assign(floorGeo, p); }
+  else { // sin giroscopio: el balón queda fijo en la pantalla
+    anchor.seen = true; floorGeo.cx = anchor.fx * innerWidth; floorGeo.cy = anchor.fy * innerHeight;
+    floorGeo.r = FLOOR.BALL_R / (FLOOR.BALL_D * th) * innerHeight / 2;
+  }
   const ring = $('ring'), d = floorGeo.r * 2.5;
   ring.style.width = ring.style.height = d + 'px'; ring.style.transform = `translate(${floorGeo.cx - d / 2}px,${floorGeo.cy - d / 2}px)`;
   $('floorUi').style.top = (innerHeight * (1 - FLOOR.F) + 6) + 'px';
 }
-function floorZone(vw, vh) { // zona del balón en píxeles del video (para el detector)
-  const W = innerWidth, H = innerHeight, FH = H * FLOOR.F, s = Math.max(W / vw, FH / vh);
-  const ox = (W - vw * s) / 2, oy = H - FH + (FH - vh * s) / 2;
-  let x = (floorGeo.cx - ox) / s; if (S.mirror) x = vw - x;
-  return { x, y: (floorGeo.cy - oy) / s, r: floorGeo.r / s * 1.15 };
+function floorZone(vw, vh) { // zona del balón en píxeles del video (para el detector); null si no se ve
+  if (!anchor.seen) return null;
+  const m = stripMap();
+  let x = (floorGeo.cx - m.ox) / m.s; if (S.mirror) x = vw - x;
+  return { x, y: (floorGeo.cy - m.oy) / m.s, r: floorGeo.r / m.s * 1.3 };
 }
-const _fb = new THREE.Vector3();
-function floorBall(out = _fb) { // posición del balón «sobre tu piso» en el mundo 3D
-  const th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  return camera.localToWorld(out.set(0, FLOOR.BALL_Y * th * FLOOR.BALL_D, -FLOOR.BALL_D));
+function floorPlace(obj) { // ubica el balón 3D justo encima del punto de tu piso (posición y tamaño en pantalla)
+  if (!footMode) return false;
+  obj.visible = anchor.seen; if (!anchor.seen) return false;
+  const W = innerWidth, H = innerHeight, th = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), D = FLOOR.BALL_D;
+  const nx = floorGeo.cx / W * 2 - 1, ny = -(floorGeo.cy / H * 2 - 1);
+  camera.localToWorld(obj.position.set(nx * th * camera.aspect * D, ny * th * D, -D));
+  obj.scale.setScalar(floorGeo.r * D * th / (FLOOR.BALL_R * H / 2));
+  return true;
 }
 function setFloorMsg(t) { const m = $('floorMsg'); if (m.textContent !== t) m.textContent = t; }
 async function beginFoot() {
   if (!S.cam || !video.srcObject) { toast('Para patear con el pie necesitas la cámara. Juega deslizando el dedo.', 4000); startScene(); return; }
   if (handsOn) { stopHands(); handsOn = false; hand.present = false; $('cursor').style.opacity = 0; }
-  footMode = true; updatePip(); keepAwake();
-  // apuntas el celular a tus pies: la vista 3D queda fija (el sensor de movimiento se apaga mientras pateas)
+  footMode = true; updatePip(); keepAwake(); requestGyro();
+  // la vista 3D del estadio queda fija; el giroscopio se usa solo para anclar el balón a tu piso
   if (gyro.on) { gyroBeforeFoot = true; gyro.on = false; } lookReset(look.yaw, 0); refreshTools();
-  floorBuild(); floorMesh.visible = true; floorLayout();
+  floorBuild(); floorMesh.visible = true; floorReset(); floorLayout();
   document.body.classList.add('floor'); $('floorUi').classList.remove('hidden'); $('ring').classList.remove('hidden');
-  setFloorMsg('🟡 Pon el pie detrás del balón…');
+  setFloorMsg('🟡 Pie detrás del balón');
   startFoot(video, floorZone, onFoot);
-  card('🦶 PATEA DE VERDAD', `<ol class="steps"><li><b>Sostén el celular</b> con la cámara de atrás apuntando a tus pies.</li><li>Abajo verás <b>tu piso con el balón encima</b>. Pon un pie justo detrás del balón.</li><li>Cuando el aro del balón se ponga <b>verde</b>, <b>¡patea a través del balón!</b> Para apuntar, patea un poco hacia la izquierda o la derecha.</li></ol><p class="small">¿No cuenta tus patadas? Toca «⚡ Sensib.». También puedes deslizar el dedo hacia arriba.</p>`, [{ label: '¡A PATEAR!', primary: true, fn: startScene }], 'how');
+  card('🦶 PATEA DE VERDAD', `<ol class="steps"><li><b>Sostén el celular</b> con la cámara de atrás apuntando a tus pies.</li><li>Abajo verás <b>tu piso con el balón encima</b>. El balón se queda en ese lugar aunque muevas el celular. Para cambiarlo de sitio, <b>toca tu piso</b>.</li><li>Pon un pie detrás del balón y, cuando el aro se ponga <b>verde</b>, <b>¡patéalo!</b> Para apuntar, patea un poco hacia la izquierda o la derecha.</li></ol><p class="small">¿No cuenta tus patadas? Toca «⚡ Sensib.». También puedes deslizar el dedo hacia arriba.</p>`, [{ label: '¡A PATEAR!', primary: true, fn: () => { floorReset(); startScene(); } }], 'how');
 }
 function endFoot() {
   const was = footMode; footMode = false; stopFoot();
@@ -452,8 +494,20 @@ function onFoot(r) {
   if (now - floorFlash < 900) return;
   const st = r.ready ? 'good' : r.still === false ? 'move' : 'mid';
   ring.dataset.st = st;
-  setFloorMsg(st === 'good' ? '🟢 ¡Listo! Patea el balón' : st === 'move' ? '📱 Sostén el celular quieto' : '🟡 Pon el pie detrás del balón…');
+  setFloorMsg(!anchor.seen ? '📱 Apunta al balón' : st === 'good' ? '🟢 ¡Patea!' : st === 'move' ? '📱 Más quieto' : '🟡 Pie detrás del balón');
 }
+// tocar tu piso (sin deslizar) pone el balón en ese lugar
+let floorTap = null;
+touch.addEventListener('pointerdown', e => { floorTap = footMode ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : null; });
+touch.addEventListener('pointerup', e => {
+  const s = floorTap; floorTap = null;
+  if (!s || !footMode || blocked() || Math.hypot(e.clientX - s.x, e.clientY - s.y) > 14 || e.timeStamp - s.t > 400) return;
+  if (e.clientY < innerHeight * (1 - FLOOR.F)) return;
+  if (S.scene && S.scene.canKick && !S.scene.canKick()) return;
+  if (gyro.data) { if (placeBallAt(e.clientX, e.clientY)) { sfx('click'); toast('📍 Balón colocado ahí', 1000); } else toast('📱 Apunta el celular hacia el piso', 1600); }
+  else { anchor.fx = e.clientX / innerWidth; anchor.fy = e.clientY / innerHeight; sfx('click'); }
+});
+$('fPlace').onclick = () => { sfx('click'); floorReset(); toast('📍 Balón frente a ti', 1000); };
 const SENS = [[1, 'normal'], [1.6, 'alta'], [0.7, 'baja']];
 $('fSens').onclick = () => {
   const i = (SENS.findIndex(([v]) => v === foot.sens) + 1) % SENS.length; foot.sens = SENS[i][0];
@@ -469,7 +523,7 @@ const ctx = {
   isHand: () => S.mode === 'hand',
   handVisible: () => S.mode === 'hand' && hand.present,
   gyroOn: () => gyro.on && !!gyro.data, gyroData: () => gyro.data, GAMES, audio: () => (S.sound && ac ? ac : null),
-  footOn: () => footMode, floorBall: o => floorBall(o), pop, shake, slowmo, best, fx: () => S.fx,
+  footOn: () => footMode, floorPlace: o => floorPlace(o), floorReset: () => footMode && floorReset(), pop, shake, slowmo, best, fx: () => S.fx,
   enter: (k, o) => enter(k, o), win: (k, st) => win(k, st), lose: m => lose(m), ready: () => ready()
 };
 let winStar = null, winT = 0;
@@ -641,7 +695,10 @@ renderer.setAnimationLoop(() => {
     const a = trauma.v * trauma.v * 0.035; camera.rotateX((Math.random() - 0.5) * a); camera.rotateY((Math.random() - 0.5) * a);
     trauma.v = Math.max(0, trauma.v - dt * 1.6);
   }
-  if (footMode) { floorLayout(); $('ring').classList.toggle('off', !!(S.scene && S.scene.canKick && !S.scene.canKick())); }
+  if (footMode) {
+    floorLayout(); $('ring').classList.toggle('off', !anchor.seen || !!(S.scene && S.scene.canKick && !S.scene.canKick()));
+    if (!anchor.seen) setFloorMsg('📱 Apunta al balón');
+  }
   if (winStar) {
     winT += dt;
     winStar.scale.setScalar(Math.min(1, winT * 2) * 0.9);

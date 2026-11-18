@@ -58,6 +58,7 @@
 | 2026-11-18 | La patada se detecta por movimiento sobre el balón, no con detección de cuerpo | con la cámara hacia los pies no se ve el cuerpo entero |
 | 2026-11-18 | Baloncesto: tocar = driblar, mantener y soltar en verde = tirar | imita la mecánica real (driblar, subir, soltar arriba) |
 | 2026-11-18 | Se mantienen 6 aciertos (duelo), 5 canastas y 1 estrella por juego | decisiones previas de Cielo |
+| 2026-11-18 | El balón para patear queda anclado a tu piso real (giroscopio) y se recoloca tocando el piso; el detector descuenta el temblor del celular | con el balón pegado a la pantalla, mover el celular impedía patear |
 | 2026-11-18 | Los textos en fuente pixel van sin tildes (la ñ sí se conserva) | «Press Start 2P» no trae Á, Ó, Ú: mezclaba dos fuentes |
 | 2026-11-18 | El zoom con dos dedos queda bloqueado | en un juego táctil el gesto de zoom rompe los controles |
 | 2026-11-18 | Medallas: baloncesto por tiempo (≤45 s oro, ≤75 s plata); penales y fútbol americano por intentos | recompensa extra sin cambiar la condición de la estrella |

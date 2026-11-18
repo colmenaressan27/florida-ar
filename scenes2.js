@@ -397,7 +397,7 @@ function fg(ctx, opt) {
   for (let i = 0; i < 7; i++) { const P = person({ h: rnd(1.85, 2), athlete: true, top: 0x1d3a8a, bottom: 0xffffff, num: String(90 + i) }); helmet(P, 0xd4202a); g.add(P.p); team.push(P); }
   const ref = person({ h: 1.8, topMat: stripedMat('#ffffff', '#111111', 12), bottom: 0xffffff, sleeves: true }); ref.p.position.set(0, 0, PZ + 2); g.add(ref.p); refs.push(ref);
   function setup() {
-    const z = spotZ(); st = 'rest'; crossed = false;
+    const z = spotZ(); st = 'rest'; crossed = false; ball.scale.setScalar(1); ball.visible = true; ctx.floorReset(); // con el pie: el balón aparece en tu piso, frente a ti
     ball.position.set(0, 0.26, z);
     tee.position.z = z; ball.rotation.set(0.35, 0, 0);
     team.forEach((P, i) => { const k = i % 7, def = i >= 7; P.p.position.set((k - 3) * 1.1, 0, z - (def ? 7.5 : 6.3)); P.legs.forEach(l => { l.th.rotation.x = -0.6; l.kn.rotation.x = 0.9; }); P.hips.position.y = P.leg * 0.85; P.arms.forEach(a => { a.sh.rotation.x = def ? -1.6 : -0.4; }); });
@@ -420,7 +420,7 @@ function fg(ctx, opt) {
   return {
     camLock: !opt.quick, foot: true, refreshHint: startHint,
     start() { running = true; this.camLock = false; setup(); startHint(); },
-    canKick: () => running && st === 'rest',
+    canKick: () => running && st === 'rest' && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
     onMove(p) { if (running && p.src === 'hand' && !ctx.footOn()) { const v = flick(p); if (v) kick(v); } },
     onUp(p) { if (!running || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) kick(v); },
@@ -430,9 +430,10 @@ function fg(ctx, opt) {
       ST.cheer(t, cel > 0 ? 0.3 : 0.02); cel = Math.max(0, cel - dt);
       g.traverse(o => { if (o.userData.flag) o.rotation.y = Math.sin(t * 3) * 0.4; });
       if (cel > 0) { refs[0].arms.forEach(a => (a.sh.rotation.x = -3)); team.slice(0, 7).forEach(P => P.arms.forEach(a => (a.sh.rotation.x = -2.9))); } else idleAnim(ref, t);
-      if (st === 'rest' && ctx.footOn() && running) { ctx.floorBall(ball.position); ball.rotation.set(0.35, t * 0.6, 0); } // el balón espera sobre tu piso real
+      if (st === 'rest' && ctx.footOn() && running) { ctx.floorPlace(ball); ball.rotation.set(0.35, t * 0.6, 0); } // el balón queda anclado a tu piso real
       if (st === 'fly') {
         fbT += dt; vel.y -= 9.8 * dt; const pz = ball.position.z; ball.position.addScaledVector(vel, dt); ball.rotation.x -= dt * 12;
+        ball.visible = true; if (ball.scale.x !== 1) ball.scale.setScalar(Math.abs(ball.scale.x - 1) < 0.01 ? 1 : lerp(ball.scale.x, 1, 0.15));
         if (!slowed && !crossed && ball.position.z - PZ < 5 && ball.position.y > 2) { slowed = true; ctx.slowmo(0.7, 0.4); } // suspenso: ¿entra o no?
         if (!crossed && pz > PZ && ball.position.z <= PZ) {
           crossed = true;
@@ -498,7 +499,7 @@ function penalty(ctx, opt) {
   let running = false, shots = 0, goals = 0, st = 'rest', vel = new V3(), cel = 0, dive = 0, diveT = 0, kx = 0, res = '', saveX = 0, netK = 0, flyT = 0;
   const info = () => ctx.info(`⚽ Goles ${goals} · Penal ${Math.min(shots + (st === 'rest' ? 1 : 0), 5)}/5 · Necesitas 3`);
   function setup() {
-    st = 'rest'; res = ''; dive = 0; diveT = 0; ball.position.set(0, 0.11, 0); ball.rotation.set(0, 0, 0);
+    st = 'rest'; res = ''; dive = 0; diveT = 0; ball.position.set(0, 0.11, 0); ball.rotation.set(0, 0, 0); ball.scale.setScalar(1); ball.visible = true; ctx.floorReset();
     K.p.position.set(0, 0, GZ + 0.3); K.p.rotation.set(0, 0, 0); K.hips.position.y = K.leg;
     camera.position.set(0, 1.6, 2.8); ctx.lookReset(0, -0.05); info();
   }
@@ -518,7 +519,7 @@ function penalty(ctx, opt) {
   return {
     camLock: !opt.quick, foot: true, refreshHint: startHint,
     start() { running = true; this.camLock = false; setup(); startHint(); },
-    canKick: () => running && st === 'rest',
+    canKick: () => running && st === 'rest' && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
     onMove(p) { if (running && p.src === 'hand' && !ctx.footOn()) { const v = flick(p); if (v) shoot(v); } },
     onUp(p) { if (!running || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) shoot(v); },
@@ -535,9 +536,10 @@ function penalty(ctx, opt) {
         kx = Math.sin(t * 1.6) * 0.8; K.p.position.x = kx; K.legs.forEach(l => { l.th.rotation.x = -0.4; l.kn.rotation.x = 0.7; }); K.hips.position.y = K.leg - 0.12;
         K.arms.forEach(a => { a.sh.rotation.z = a.s * 0.7; a.sh.rotation.x = -0.3; a.el.rotation.x = -0.4; });
       }
-      if (st === 'rest' && ctx.footOn() && running) { ctx.floorBall(ball.position); ball.rotation.set(0, t * 0.6, 0); } // el balón espera sobre tu piso real
+      if (st === 'rest' && ctx.footOn() && running) { ctx.floorPlace(ball); ball.rotation.set(0, t * 0.6, 0); } // el balón queda anclado a tu piso real
       if (st === 'fly') {
         flyT += dt; vel.y -= 9.8 * dt; const pz = ball.position.z; ball.position.addScaledVector(vel, dt); ball.rotation.x -= dt * 20;
+        ball.visible = true; if (ball.scale.x !== 1) ball.scale.setScalar(Math.abs(ball.scale.x - 1) < 0.01 ? 1 : lerp(ball.scale.x, 1, 0.15));
         if (!slowed && !res && ball.position.z - GZ < 3) { slowed = true; ctx.slowmo(0.45, 0.35); } // suspenso frente al portero
         if (pz > GZ && ball.position.z <= GZ && !res) {
           const { x, y } = ball.position, inGoal = Math.abs(x) < GI.half - GI.postR && y < GI.bar - 0.04 && y > 0;

@@ -9,10 +9,30 @@ export const foot = { sens: 1 };
 //   ratio: el balón debe moverse X veces más que el resto de la imagen (así mover el celular no cuenta).
 //   calm: cuánto puede moverse el área del balón mientras «esperas» antes de patear.
 //   diff: diferencia de brillo (0–255) para considerar que un píxel cambió.
-export const KICK = { zone: 0.16, ratio: 2.5, calm: 0.06, diff: 26, cooldown: 1200 };
+export const KICK = { zone: 0.14, ratio: 2.5, calm: 0.06, diff: 26, cooldown: 1100 };
 const SW = 96; // ancho de la imagen reducida que se analiza
+const SHIFT = 5; // cuántos píxeles (de esa imagen) puede moverse el celular entre un cuadro y otro y aun así compensarse
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+// Cuánto se movió la imagen completa entre dos cuadros (la mano que sostiene el celular nunca está quieta).
+// Prueba desplazamientos de -R a +R píxeles y se queda con el que mejor encaja, sin mirar la zona del balón (ahí está el pie).
+function globalShift(gray, prev, w, h, zone, R) {
+  const B2 = (zone.r * 2.6) ** 2;
+  let best = Infinity, bx = 0, by = 0;
+  for (let oy = -R; oy <= R; oy++) for (let ox = -R; ox <= R; ox++) {
+    let sad = 0, n = 0;
+    for (let y = R; y < h - R; y += 2) {
+      const dy = y - zone.y, row = y * w, prow = (y + oy) * w + ox;
+      for (let x = R; x < w - R; x += 2) {
+        const dx = x - zone.x; if (dx * dx + dy * dy < B2) continue;
+        sad += Math.abs(gray[row + x] - prev[prow + x]); n++;
+      }
+    }
+    sad = n ? sad / n : 0;
+    if (sad < best - 0.01 || (Math.abs(sad - best) <= 0.01 && ox * ox + oy * oy < bx * bx + by * by)) { best = sad; bx = ox; by = oy; }
+  }
+  return { dx: bx, dy: by };
+}
 export function createMotionKick() {
   let prev = null, hist = [], cdUntil = 0, pend = null;
   return {
@@ -20,12 +40,15 @@ export function createMotionKick() {
     // gray: brillo de cada píxel (Uint8Array w*h). zone: centro y radio del balón en esos píxeles. t: milisegundos.
     update(gray, w, h, zone, t) {
       if (!prev || prev.length !== gray.length) { prev = gray.slice(); return { ready: false, ez: 0, eg: 0 }; }
+      // 1) se descuenta el movimiento del celular; 2) se cuenta qué cambió dentro del balón y qué cambió en el resto
+      const sh = globalShift(gray, prev, w, h, zone, SHIFT);
       const R2 = zone.r * zone.r, B2 = (zone.r * 2.6) ** 2, D = KICK.diff;
       let zc = 0, zn = 0, gc = 0, gn = 0, sx = 0, sy = 0, mc = 0;
-      for (let y = 0, i = 0; y < h; y++) {
-        const dy = y - zone.y;
-        for (let x = 0; x < w; x++, i++) {
-          const moved = Math.abs(gray[i] - prev[i]) > D, dx = x - zone.x, d2 = dx * dx + dy * dy;
+      for (let y = 0; y < h; y++) {
+        const dy = y - zone.y, py = y + sh.dy; if (py < 0 || py >= h) continue;
+        for (let x = 0; x < w; x++) {
+          const px = x + sh.dx; if (px < 0 || px >= w) continue;
+          const moved = Math.abs(gray[y * w + x] - prev[py * w + px]) > D, dx = x - zone.x, d2 = dx * dx + dy * dy;
           if (d2 <= R2) { zn++; if (moved) zc++; }
           if (d2 <= B2) { if (moved) { sx += x; sy += y; mc++; } } else { gn++; if (moved) gc++; }
         }

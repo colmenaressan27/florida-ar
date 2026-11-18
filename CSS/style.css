@@ -195,7 +195,9 @@ ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;lef
 @keyframes spin{to{rotate:calc(360deg*var(--motion))}}
 #floorUi{position:absolute;left:10px;right:10px;top:55%;display:flex;justify-content:space-between;align-items:center;gap:8px;z-index:4;pointer-events:none}
 #floorMsg{background:var(--glass);border:1px solid var(--line);padding:8px 12px;border-radius:999px;font:800 15px/1.2 var(--font-ui);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-#fSens{pointer-events:auto;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--glass);font:800 14px var(--font-ui);white-space:nowrap}
+.fbtns{display:flex;gap:6px}
+#fSens,#fPlace{pointer-events:auto;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--glass);font:800 14px var(--font-ui);white-space:nowrap}
+#floorMsg{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- recuadro de cámara (modo mano) ---------- */
 #pip{position:absolute;left:10px;top:calc(var(--safe-t) + 150px);width:min(34vw,210px);border-radius:16px;overflow:hidden;background:#000;border:3px solid rgba(255,255,255,.75);box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:5;transition:border-color .2s}
