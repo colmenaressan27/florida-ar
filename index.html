@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b1026">
+<title>Florida AR Adventure</title>
+<link rel="stylesheet" href="CSS/style.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="scene"></canvas>
+
+<div id="app">
+  <div id="touch"></div>
+  <canvas id="handsLayer"></canvas>
+  <div id="crosshair" class="hidden"></div>
+  <div id="cursor"></div>
+  <div id="flash"></div>
+  <div id="pip" class="hidden" title="Toca para agrandar o achicar"><canvas id="pipCv"></canvas><div id="footstat"></div></div>
+  <div id="footbar" class="hidden"><button id="fUp">Punto ▲</button><button id="fDn">Punto ▼</button><button id="fSens" aria-label="Sensibilidad de la patada">Sensib.: normal</button></div>
+  <div id="arrow" class="hidden">➤</div>
+  <div id="fade"></div>
+
+  <header id="hud" class="hidden">
+    <button id="bBack" class="ib" aria-label="Regresar">←</button>
+    <div class="tools">
+      <button id="bPip" class="ib hidden" aria-label="Mostrar u ocultar el recuadro de la cámara">📷</button>
+      <button id="bSound" class="ib" aria-label="Sonido">🔊</button>
+      <button id="bMode" class="ib" aria-label="Cambiar controles">⚙️</button>
+      <button id="bRestart" class="ib" aria-label="Reiniciar">↻</button>
+      <button id="bCenter" class="ib" aria-label="Recentrar">🎯</button>
+      <button id="bGyro" class="ib" aria-label="Sensor de movimiento">🧭</button>
+    </div>
+    <div id="stars"></div>
+  </header>
+  <div id="info" class="hidden"></div>
+  <div id="hint" class="hidden"></div>
+
+  <div id="spells" class="hidden">
+    <button class="sp on" data-s="expelliarmus">🔴<span>Expelliarmus</span></button>
+    <button class="sp" data-s="stupefy">⚡<span>Stupefy</span></button>
+    <button class="sp" data-s="protego">🛡️<span>Protego</span></button>
+    <button id="bCast" class="cast">✨ Lanzar</button>
+  </div>
+
+  <section id="welcome" class="screen show">
+    <div class="panel">
+      <div class="emo">🏰 🌴 🏀</div>
+      <h1>FLORIDA<br>AR ADVENTURE</h1>
+      <p>Abre el cofre mágico y descubre Orlando, Miami y el Miami Heat en realidad aumentada, directo en tu navegador.</p>
+      <button id="bStart" class="btn primary">Comenzar aventura</button>
+      <p class="small">En celular, úsalo en vertical.</p>
+    </div>
+  </section>
+
+  <section id="perm" class="screen">
+    <div class="panel">
+      <div class="emo">📷</div>
+      <h2>Necesitamos tu cámara</h2>
+      <p>El juego muestra tu entorno real y coloca escenarios 3D encima. En celular se usa la cámara trasera; en computador, la cámara web. No se graba ni se envía nada.</p>
+      <p id="camErr" class="err hidden"></p>
+      <button id="bCam" class="btn primary">Permitir cámara</button>
+      <button id="bNoCam" class="btn">Jugar sin cámara</button>
+    </div>
+  </section>
+
+  <section id="controls" class="screen">
+    <div class="panel">
+      <h2>¿Cómo quieres jugar?</h2>
+      <button class="opt" data-m="hand" id="optHand"><b>✋ Modo A · Gestos de mano</b><span>La punta de tu índice es el cursor. Déjalo quieto sobre algo para seleccionarlo (o haz pinza). En celular, pon la otra mano frente a la cámara trasera.</span></button>
+      <div class="qrow">Calidad: <button class="qbtn" data-q="0">Baja</button><button class="qbtn" data-q="1">Media</button><button class="qbtn" data-q="2">Alta</button></div>
+      <button class="opt" data-m="touch" id="optTouch"><b>👆 Modo B · Controles táctiles</b><span>Toca y desliza. Gira el celular para mirar alrededor. Ideal en celular.</span></button>
+    </div>
+  </section>
+
+  <div id="card" class="modal">
+    <div class="panel"><h2></h2><div class="body"></div><div class="btns"></div></div>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<script type="module" src="game.js"></script>
+</body>
+</html>
