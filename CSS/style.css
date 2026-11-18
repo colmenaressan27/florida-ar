@@ -215,14 +215,22 @@ ol.steps li::before{counter-increment:s;content:counter(s);position:absolute;lef
 #spells{position:absolute;left:0;right:0;bottom:calc(var(--safe-b) + 10px);display:flex;flex-wrap:wrap;gap:8px;justify-content:center;padding:0 10px;z-index:4}
 .sp{flex:1 1 30%;max-width:150px;min-height:58px;border:2px solid transparent;border-radius:16px;background:var(--glass);color:#fff;font-size:20px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .sp span{font-size:12px;font-weight:800}
-.sp.on{border-color:var(--sun);background:rgba(90,40,150,.9)}
+.sp.on{border-color:var(--c,var(--sun));background:rgba(90,40,150,.9);box-shadow:0 0 0 3px var(--c,var(--sun)),0 0 22px var(--c,var(--sun));animation:spPulse .7s ease-in-out infinite alternate}
+@keyframes spPulse{to{transform:scale(1.07)}}
 .sp.cool{opacity:.4}
+#trail{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
 .cast{flex:1 1 100%;max-width:470px;min-height:58px;border:none;border-radius:18px;font:800 20px var(--font-ui);color:#fff;background:linear-gradient(90deg,#7b3cff,#d4207a);box-shadow:inset 0 -4px 0 rgba(0,0,0,.3)}
 #pickbar{position:absolute;left:0;right:0;bottom:calc(var(--safe-b) + 12px);display:flex;gap:8px;padding:0 10px;justify-content:center;z-index:4}
 #pickbar button{flex:1 1 0;max-width:180px;min-height:76px;border:2px solid var(--line);border-radius:16px;background:rgba(14,20,52,.88);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px;touch-action:none}
 #pickbar button b{font-size:15px}
 #pickbar button span{font-size:12px;opacity:.85}
 #pickbar button.attack,#pickbar button.big{max-width:440px;font-size:21px;font-weight:800;background:linear-gradient(90deg,#d4202a,#ff8a00);box-shadow:inset 0 -5px 0 rgba(0,0,0,.25)}
+#pickbar button.attack{flex:2 1 0}
+#pickbar button.attack:disabled{opacity:.45}
+#pickbar button.cover{flex:1 1 0;max-width:200px;font:800 17px var(--font-ui);color:#1a0b2e;background:linear-gradient(180deg,#9feaff,#24d1ff);border-color:transparent;box-shadow:inset 0 -5px 0 rgba(0,0,0,.2);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#pickbar button.cover.on{transform:translateY(3px);box-shadow:inset 0 -2px 0 rgba(0,0,0,.2),0 0 0 3px #fff}
+#pickbar button.cover.warn{animation:coverWarn .35s ease-in-out infinite alternate}
+@keyframes coverWarn{to{box-shadow:inset 0 -5px 0 rgba(0,0,0,.2),0 0 0 4px var(--bad,#ff4d5e),0 0 24px var(--bad,#ff4d5e)}}
 #pickbar button.lane{max-width:none;font-size:34px;min-height:88px;background:rgba(14,20,52,.75)}
 #pickbar button.lane:active{background:linear-gradient(90deg,var(--pink),var(--orange))}
 #drivepad{position:absolute;left:0;right:0;bottom:calc(var(--safe-b) + 70px);display:flex;justify-content:space-between;padding:0 12px;pointer-events:none;z-index:3}

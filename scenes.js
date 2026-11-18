@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { modelo, modelInfo, setMaterial } from './models.js';
+import { classify, createStroker } from './gestures.js';
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
 
@@ -796,11 +797,21 @@ function orlando(ctx, opt) {
   // Mago enemigo
   const E = wizard(); const en = E.w; en.position.set(0, 0, -23); en.visible = false; g.add(en);
   const stunStars = [0, 1, 2].map(() => { const s = starMesh(); s.scale.setScalar(0.25); s.visible = false; en.add(s); return s; });
+  // Hechizos por gestos (fase 2): ⚡ zigzag = RAYO (rompe la barrera y aturde) · — línea = DESARME · ⭕ círculo = ESCUDO
+  const SP = {
+    zigzag: { name: 'RAYO', col: 0xffd23a, css: '#ffd23a', icon: '⚡', how: 'un ZIGZAG ⚡', hit: '¡ATURDIDO!' },
+    line: { name: 'DESARME', col: 0xff4d5e, css: '#ff4d5e', icon: '➖', how: 'una LÍNEA rápida ➖', hit: '¡DESARMADO!' },
+    circle: { name: 'ESCUDO', col: 0x66ccff, css: '#66ccff', icon: '⭕', how: 'un CÍRCULO ⭕', hit: '¡REBOTE!' }
+  };
+  // Turnos del mago: la runa que muestra dice qué hechizo funciona.
+  // open = baja la guardia (línea) · barrier = barrera de cristal (zigzag) · attack = te lanza una bola verde (círculo antes de que llegue)
+  const NEED = { open: 'line', barrier: 'zigzag', attack: 'circle' };
+  // win = segundos para responder (en attack, lo que tarda en cargar la bola); fast = multiplicador cuando se enfurece; bolt = velocidad de su bola (m/s)
+  const DUEL = { win: { open: 2.8, barrier: 3.0, attack: 1.3 }, fast: 0.75, hand: 1.3, gap: [1.0, 1.6], bolt: 7 }; // hand = tiempo extra al dibujar en el aire
   // Varita del jugador: madera tallada de unos 30 cm, sin brillo exagerado
-  const COL = { expelliarmus: 0xff3030, stupefy: 0x8fd0ff, protego: 0x66ccff };
   const wand = new THREE.Group(); camera.add(wand);
   let W = WANDS[0], wandMesh = null;
-  const tip = glow(COL.expelliarmus, 0.06, 0.8); wand.add(tip);
+  const tip = glow(0xffe2b0, 0.06, 0.8); wand.add(tip);
   const setWand = i => {
     W = WANDS[i]; if (wandMesh) { wand.remove(wandMesh); disposeTree(wandMesh); }
     wandMesh = wandModel(W, i); wandMesh.rotation.x = Math.PI / 2; wand.add(wandMesh); tip.position.z = W.len + 0.008;
@@ -819,20 +830,67 @@ function orlando(ctx, opt) {
   const pickW = p => { const h = p.ray.intersectObjects(picks, true).find(o => o.object.userData.wi !== undefined); return h ? h.object.userData.wi : null; };
   const shield = new THREE.Group(); shield.position.set(0, -0.02, -0.6); shield.visible = false; camera.add(shield);
   add(shield, new THREE.CircleGeometry(0.42, 48), temp(new THREE.MeshBasicMaterial({ color: 0x66ccff, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })), 0, 0, 0, false);
-  const hex = add(shield, new THREE.IcosahedronGeometry(0.42, 1), temp(new THREE.MeshBasicMaterial({ color: 0xaee8ff, wireframe: true, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending })), 0, 0, 0, false);
+  const hex = add(shield, new THREE.IcosahedronGeometry(0.42, 1), temp(new THREE.MeshBasicMaterial({ color: 0xaee8ff, wireframe: true, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending })), 0, 0, 0, false);
   hex.scale.z = 0.25;
-
+  // runa sobre el mago: muestra la figura que tienes que dibujar
+  const runeTex = {};
+  for (const k of Object.keys(SP)) runeTex[k] = canvasTex(256, 256, (q, w) => {
+    q.fillStyle = 'rgba(10,8,30,.55)'; q.beginPath(); q.arc(128, 128, 118, 0, 7); q.fill();
+    q.strokeStyle = SP[k].css; q.shadowColor = SP[k].css; q.shadowBlur = 24; q.lineWidth = 8; q.beginPath(); q.arc(128, 128, 112, 0, 7); q.stroke();
+    q.lineWidth = 18; q.lineCap = q.lineJoin = 'round'; q.beginPath();
+    if (k === 'line') { q.moveTo(58, 160); q.lineTo(198, 96); }
+    else if (k === 'circle') q.arc(128, 128, 62, 0, 7);
+    else { q.moveTo(70, 72); q.lineTo(186, 72); q.lineTo(70, 184); q.lineTo(186, 184); }
+    q.stroke(); q.shadowBlur = 0; q.strokeStyle = '#fff'; q.lineWidth = 6; q.stroke();
+  });
+  const rune = new THREE.Sprite(temp(new THREE.SpriteMaterial({ map: runeTex.line, transparent: true, depthWrite: false, fog: false }))); rune.visible = false; rune.renderOrder = 8; g.add(rune);
+  // barrera de cristal del mago (solo la rompe el rayo ⚡)
+  const barrier = new THREE.Group(); barrier.visible = false; g.add(barrier);
+  add(barrier, new THREE.IcosahedronGeometry(1.15, 1), temp(new THREE.MeshBasicMaterial({ color: 0xb38bff, wireframe: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })), 0, 1.1, 0, false);
+  add(barrier, sph(1.1, 24), temp(new THREE.MeshBasicMaterial({ color: 0x8a5cff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false })), 0, 1.1, 0, false);
+  // trazo luminoso de tu dedo en la pantalla
+  const cv = document.createElement('canvas'); cv.id = 'trail'; document.getElementById('app').appendChild(cv);
+  const c2 = cv.getContext('2d');
+  const trail = { pts: [], col: '#ffffff', fade: 0, demo: null };
+  const stroker = createStroker(); let stroke = null;
+  function drawTrail(dt) {
+    const dpr = Math.min(2, devicePixelRatio || 1), W2 = Math.round(innerWidth * dpr), H2 = Math.round(innerHeight * dpr);
+    if (cv.width !== W2 || cv.height !== H2) { cv.width = W2; cv.height = H2; }
+    c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, W2, H2);
+    if (trail.demo) { // demostración de cómo se dibuja una figura (al tocar la leyenda)
+      const D = trail.demo; D.t += dt; trail.pts = D.pts.slice(0, Math.max(2, Math.ceil(D.pts.length * Math.min(1, D.t / 0.8)))); trail.col = SP[D.k].css;
+      if (D.t > 1.1) { trail.demo = null; trail.fade = 1; }
+    } else {
+      if (!stroke && !stroker.active && trail.fade === 0 && trail.pts.length) trail.fade = 1;
+      if (trail.fade > 0) { trail.fade -= dt * 2.2; if (trail.fade <= 0) { trail.fade = 0; trail.pts = []; } }
+    }
+    const P = trail.pts; if (P.length < 2) return;
+    c2.setTransform(dpr, 0, 0, dpr, 0, 0); c2.globalAlpha = trail.fade > 0 ? trail.fade : 1;
+    c2.lineCap = c2.lineJoin = 'round'; c2.beginPath(); c2.moveTo(P[0].x, P[0].y); for (let i = 1; i < P.length; i++) c2.lineTo(P[i].x, P[i].y);
+    if (ctx.fx()) { c2.shadowColor = trail.col; c2.shadowBlur = 18; }
+    c2.strokeStyle = trail.col; c2.lineWidth = 10; c2.stroke();
+    c2.shadowBlur = 0; c2.strokeStyle = 'rgba(255,255,255,.9)'; c2.lineWidth = 3; c2.stroke(); c2.globalAlpha = 1;
+  }
+  function demo(k) { // dibuja la figura de ejemplo en la pantalla
+    const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.5, r = Math.min(w, h) * 0.2, pts = [];
+    if (k === 'line') for (let i = 0; i <= 30; i++) pts.push({ x: cx - r * 1.3 + i / 30 * r * 2.6, y: cy + r * 0.5 - i / 30 * r });
+    else if (k === 'circle') for (let i = 0; i <= 48; i++) { const a = -Math.PI / 2 + i / 48 * Math.PI * 2; pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }); }
+    else { const V = [[-1, -0.7], [1, -0.7], [-1, 0.7], [1, 0.7]]; for (let s = 1; s < 4; s++) for (let i = 0; i <= 12; i++) { const u = i / 12; pts.push({ x: cx + r * (V[s - 1][0] + (V[s][0] - V[s - 1][0]) * u), y: cy + r * (V[s - 1][1] + (V[s][1] - V[s - 1][1]) * u) }); } }
+    trail.demo = { k, pts, t: 0 }; trail.fade = 0;
+    ctx.toast(`${SP[k].icon} ${SP[k].name}: dibuja ${SP[k].how}` + (k === 'circle' ? ' (también sirve la palma abierta ✋)' : ''), 2600);
+  }
+  // leyenda de abajo: las 3 figuras. Tocar una muestra cómo se dibuja; se ilumina la que pide la runa
   const ui = document.getElementById('spells'), btns = [...ui.querySelectorAll('.sp')];
-  let spell = 'expelliarmus';
-  const setSpell = s => { spell = s; btns.forEach(x => x.classList.toggle('on', x.dataset.s === s)); tip.material.color.set(COL[s]); };
-  btns.forEach(b => { b.onclick = () => { setSpell(b.dataset.s); ctx.sfx('click'); }; });
-  setSpell('expelliarmus');
-  document.getElementById('bCast').onclick = () => cast();
+  btns.forEach(b => { b.onclick = () => { ctx.sfx('click'); demo(b.dataset.s); }; });
+  const legend = k => btns.forEach(x => x.classList.toggle('on', x.dataset.s === k));
+  legend(null);
 
-  let alive = true, running = false, hits = 0, hp = 4, cd = 0, shieldT = 0, shieldCd = 0, stun = 0, disarm = 0, fireT = 3, charge = 0, dead = 0, won = false, tx = 0, moveT = 0, kick = 0, castAnim = 0, gateOpen = 0, gateSnd = false;
-  const shots = [], foes = [], flying = [];
+  let alive = true, running = false, hits = 0, hp = 4, cd = 0, shieldT = 0, stun = 0, disarm = 0, dead = 0, won = false, tx = 0, moveT = 0, kick = 0, castAnim = 0, gateOpen = 0, gateSnd = false;
+  let shOn = 0, turn = null, turnN = 0, gap = 2, lock = 0, combo = 0, duelT = 0, lastType = '', sameN = 0;
+  const shots = [], foes = [], flying = [], bolts = [];
   const enC = new V3(), camW = () => camera.getWorldPosition(_w);
-  const info = () => ctx.info(`${'❤️'.repeat(hp)}${'🖤'.repeat(4 - hp)} · Aciertos ${hits}/6${hits >= 3 ? ' · 😡 fase 2' : ''}`);
+  const fast = () => hits >= 3;
+  const info = () => ctx.info(`${'❤️'.repeat(hp)}${'🖤'.repeat(4 - hp)} · Aciertos ${hits}/6${combo >= 2 ? ` · 🔥 x${combo}` : ''}${fast() ? ' · 😡 fase 2' : ''}`);
   const intro = withIntro(ctx, opt, [
     { t: 0, p: [0, 1.6, 54], yaw: 0, pitch: 0.12 },
     { t: 3, p: [0, 1.6, 41], yaw: 0, pitch: 0.18 },
@@ -848,59 +906,125 @@ function orlando(ctx, opt) {
     ctx.camera.position.set(0, 1.6, -14); gateOpen = 1;
     en.visible = true; ctx.sfx('portal');
     ctx.burst(en.localToWorld(_v.set(0, 1.2, 0)), [0x9b5cff, 0x66ffcc, 0xffffff], 70, 2.2);
-    document.getElementById('crosshair').classList.remove('hidden');
   });
   ui.classList.toggle('hidden', !!intro.on);
 
-  function aimPoint() { const d = en.localToWorld(_v.set(0, 1.2, 0)).distanceTo(camW()); return ctx.ptr.ray.ray.at(d, new V3()); }
-  function cast() {
-    if (!running || cd > 0) return;
-    if (spell === 'protego') { protego(); return; }
-    cd = W.cd; kick = 1; ctx.sfx('spell');
-    const from = tip.getWorldPosition(new V3()), to = aimPoint();
-    enC.copy(en.position).setY(1.15);
-    const assist = Math.abs(to.x - enC.x) < 1.2 && Math.abs(to.y - enC.y) < 1.3;
-    const m = add(g, sph(0.07, 10), B(COL[spell]), from.x, from.y, from.z, false); m.add(glow(COL[spell], 1.1));
-    shots.push({ m, v: (assist ? enC.clone() : to).sub(from).normalize().multiplyScalar(W.sp), kind: spell, life: 1.4, assist });
-    ctx.burst(from, COL[spell], 10, 0.8);
+  function nextTurn() {
+    const TEACH = ['open', 'attack', 'barrier']; // las 3 primeras runas enseñan las 3 figuras
+    let type = turnN < 3 ? TEACH[turnN] : pick(fast() ? ['attack', 'attack', 'open', 'barrier'] : ['attack', 'open', 'barrier']);
+    if (turnN >= 3 && type === lastType && sameN >= 1) type = pick(Object.keys(NEED).filter(k => k !== lastType)); // nunca 3 runas iguales seguidas
+    sameN = type === lastType ? sameN + 1 : 0; lastType = type; turnN++;
+    const k = NEED[type];
+    turn = { type, need: k, t: 0, win: DUEL.win[type] * (fast() ? DUEL.fast : 1) * (ctx.isHand() ? DUEL.hand : 1), fired: false, done: false };
+    rune.material.map = runeTex[k]; rune.visible = true; rune.scale.setScalar(0.01);
+    runes.material.color.set(SP[k].col); legend(k); ctx.sfx('charge');
+    if (type === 'barrier') { barrier.visible = true; barrier.scale.setScalar(0.01); }
+    ctx.hint(`Runa ${SP[k].icon}: ¡dibuja ${SP[k].how}${type === 'attack' ? ' antes de que llegue la bola verde' : ''}!`);
   }
-  function protego() { if (!running || shieldCd > 0) return; shieldT = 1.7; shieldCd = 3; ctx.sfx('block'); }
+  function endTurn(late) {
+    if (!turn) return;
+    if (late) { ctx.pop('¡MUY TARDE!', 'bad'); combo = 0; info(); }
+    rune.visible = false; barrier.visible = false; runes.material.color.set(0xb38bff); legend(null);
+    turn = null; gap = rnd(DUEL.gap[0], DUEL.gap[1]) * (fast() ? 0.7 : 1);
+  }
+  function lightning(from, to, col) { // rayo en zigzag que dura un instante
+    const pts = []; for (let k = 0; k <= 12; k++) { const q = from.clone().lerp(to, k / 12); if (k && k < 12) q.add(_v.set(rnd(-0.35, 0.35), rnd(-0.35, 0.35), rnd(-0.2, 0.2))); pts.push(q); }
+    const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), temp(new THREE.LineBasicMaterial({ color: col, transparent: true, blending: THREE.AdditiveBlending })));
+    g.add(ln); bolts.push({ ln, life: 0.28 });
+  }
+  function deflect() { // el aura del mago desvía un hechizo equivocado
+    ctx.sfx('block'); ctx.burst(en.localToWorld(_v.set(0, 1.2, 0)), [0xb38bff, 0xffffff], 25, 1.6);
+  }
+  function wrong() {
+    if (!turn || turn.done) { ctx.pop('ESPERA LA RUNA', 'small'); return; }
+    ctx.pop('¡ESE NO!', 'bad'); ctx.sfx('buzzer'); lock = 0.5; combo = 0; info();
+  }
+  function cast(kind) {
+    if (!running || dead || lock > 0) return;
+    const S2 = SP[kind], ok = !!turn && !turn.done && turn.need === kind;
+    kick = 1; tip.material.color.set(S2.col);
+    if (kind === 'circle') { // escudo: en un turno de ataque se queda arriba hasta que llegue la bola
+      if (ok) { turn.done = true; shieldT = 99; ctx.pop('¡ESCUDO!', 'small'); } else { shieldT = 1.2; wrong(); }
+      ctx.sfx('block'); return;
+    }
+    if (cd > 0) return; cd = W.cd; ctx.sfx('spell');
+    const from = tip.getWorldPosition(new V3()); enC.copy(en.position).setY(1.15);
+    if (ok) turn.done = true; else wrong();
+    ctx.burst(from, S2.col, 10, 0.8);
+    if (kind === 'zigzag') { // el rayo llega al instante
+      lightning(from, enC, S2.col);
+      if (ok) { barrier.visible = false; ctx.burst(enC, [0xb38bff, 0xffffff, 0xffd23a], 90, 3); enemyHit('zigzag'); } else deflect();
+    } else { // desarme: proyectil rojo que busca al mago
+      const m = add(g, sph(0.07 * W.hit / 0.6, 10), B(S2.col), from.x, from.y, from.z, false); m.add(glow(S2.col, 1.1));
+      shots.push({ m, v: enC.clone().sub(from).normalize().multiplyScalar(W.sp), ok, kind, col: S2.col, life: 1.6 });
+    }
+  }
   function enemyHit(kind) {
-    hits++; E.segs[6 - hits].visible = false; if (hits === 3) { ctx.toast('😡 ¡El mago se enfurece! Ahora se mueve y ataca más rápido.', 3500); E.tip.material.color.set(0xff3344); } ctx.sfx('hit'); info();
-    ctx.burst(en.localToWorld(_v.set(0, 1.2, 0)), [COL[kind], 0xffffff], 50, 2);
-    E.robeM.emissive.set(kind === 'stupefy' ? 0x1f4f99 : 0x661111);
-    if (kind === 'stupefy') stun = 2.6;
-    else {
-      disarm = 2; E.wand.visible = false; charge = 0;
+    if (dead) return;
+    const quick = !!turn && kind !== 'circle' && turn.t < 1.0; // respondiste rapidísimo
+    hits++; combo++; E.segs[6 - hits].visible = false;
+    ctx.sfx('hit'); ctx.shake(0.3); if (quick) ctx.sfx('perfect');
+    ctx.burst(en.localToWorld(_v.set(0, 1.2, 0)), [SP[kind].col, 0xffffff], 50, 2);
+    E.robeM.emissive.set(kind === 'zigzag' ? 0x4a3a00 : kind === 'line' ? 0x661111 : 0x1f4f99);
+    ctx.pop(quick ? '¡RÁPIDO! ' + SP[kind].hit : SP[kind].hit, quick || combo >= 3 ? 'fire' : 'good');
+    if (combo >= 2) setTimeout(() => alive && ctx.pop(`COMBO x${combo}`, 'small'), 500);
+    if (kind === 'line') {
+      disarm = 1.8; E.wand.visible = false;
       const fw = add(g, cyl(0.012, 0.018, 0.4, 6), M(0x2a1a0a), 0, 0, 0, false);
       E.wand.getWorldPosition(fw.position); fw.userData = { v: new V3(rnd(-1.5, 1.5), 4.5, rnd(1, 2)), life: 1.8 }; flying.push(fw);
-    }
-    if (hits >= 6) { running = false; dead = 0.001; }
+    } else stun = kind === 'zigzag' ? 2.2 : 1.2;
+    if (hits === 3) { ctx.toast('😡 ¡El mago se enfurece! Sus runas duran menos y ataca más.', 3500); E.tip.material.color.set(0xff3344); }
+    endTurn(false); info();
+    if (hits >= 6) { running = false; dead = 0.001; ctx.slowmo(0.8, 0.35); legend(null); }
   }
   function remove(list, i) { const o = list[i]; g.remove(o.m || o); disposeTree(o.m || o); list.splice(i, 1); }
-  const refreshHint = () => ctx.hint(ctx.isHand() ? '☝️ Apunta al mago con tu índice (dispara solo) · ✋ palma abierta = Protego' : 'Toca al mago o pulsa ✨ Lanzar · arrastra o gira el celular para mirar');
+  function finishStroke(pts) {
+    const r = classify(pts);
+    trail.pts = pts; trail.fade = 1;
+    if (!r.kind) { trail.col = '#ffffff'; if (r.why !== 'corto') { ctx.pop('¿?', 'small'); ctx.hint('No reconocí la figura. Dibújala grande: ⚡ zigzag · ➖ línea · ⭕ círculo'); } return; }
+    trail.col = SP[r.kind].css; cast(r.kind);
+  }
+  function chooseWand(p) {
+    const i = pickW(p); if (i === null || i === undefined) return false;
+    choosing = false; shelf.visible = false; setWand(i); chosenWand = i; ctx.sfx('pickup'); ctx.toast(`🪄 Varita de ${W.name}: ${W.note}`, 3000); return true;
+  }
+  const refreshHint = () => ctx.hint(turn ? `Runa ${SP[turn.need].icon}: ¡dibuja ${SP[turn.need].how}!`
+    : ctx.isHand() ? '☝️ Dibuja en el aire con tu índice la figura de la runa del mago · ✋ palma abierta = escudo' : '👆 Dibuja con el dedo, en la pantalla, la figura de la runa del mago');
   const coTmp = new V3();
 
   return {
-    look: true, camLock: !opt.quick, dwellTime: 0.35, repeatDwell: 0.55, refreshHint,
+    look: false, camLock: !opt.quick, dwellTime: 0.6, refreshHint, _dbg: { cast: k => cast(k), need: () => (turn && !turn.done ? turn.need : null) },
     start() {
       this.camLock = false;
-      if (chosenWand !== null) { running = true; ui.classList.remove('hidden'); info(); refreshHint(); setTimeout(() => { if (alive && running) ctx.hint(''); }, 5000); return; }
+      if (chosenWand !== null) { running = true; gap = 1.4; ui.classList.remove('hidden'); document.body.classList.add('hasbar'); info(); ctx.pop('¡A DUELO!', 'fire'); refreshHint(); return; }
       choosing = true; shelf.visible = true; wand.visible = false; ui.classList.add('hidden'); ctx.info('🪄 Elige tu varita');
       ctx.hint((ctx.isHand() ? '☝️ Señala' : '👆 Toca') + ' la varita que quieras: ' + WANDS.map(d => d.name).join(' · '));
     },
-    tap(p) {
+    tap(p) { // con la mano: dejar el dedo quieto sobre una varita la elige
       if (intro.on) { intro.finish(); this.camLock = false; return; }
-      if (choosing) { const i = pickW(p); if (i === null || i === undefined) return; choosing = false; shelf.visible = false; setWand(i); chosenWand = i; ctx.sfx('pickup'); ctx.toast(`🪄 Varita de ${W.name}: ${W.note}`, 3000); this.start(); return; }
-      cast();
+      if (choosing && chooseWand(p)) this.start();
     },
-    palm() { protego(); },
-    hoverable(p) {
-      if (choosing) return pickW(p);
-      if (!running || dead) return null;
-      const c = en.localToWorld(_v.set(0, 1.2, 0));
-      return p.ray.ray.distanceSqToPoint(c) < 0.9 ? 'enemy' : null;
+    onDown(p) {
+      if (intro.on) { intro.finish(); this.camLock = false; return; }
+      if (choosing) { if (p.src === 'hand' && chooseWand(p)) this.start(); return; }
+      if (running && p.src !== 'hand') { stroke = [{ x: p.sx, y: p.sy }]; trail.pts = stroke; trail.fade = 0; trail.demo = null; trail.col = '#ffffff'; }
     },
+    onMove(p) {
+      if (choosing || !running) return;
+      if (p.src === 'hand') { // con la mano: el trazo empieza al moverla rápido y termina al quedarse quieta
+        const r = stroker.feed(p.sx, p.sy, performance.now() / 1000);
+        if (stroker.active) { trail.pts = stroker.points; trail.fade = 0; trail.demo = null; trail.col = '#ffffff'; }
+        if (r) finishStroke(r);
+        return;
+      }
+      if (stroke) stroke.push({ x: p.sx, y: p.sy });
+    },
+    onUp(p) {
+      if (choosing) { if (p.src !== 'hand' && chooseWand(p)) this.start(); return; }
+      if (stroke && p.src !== 'hand') { const s = stroke; stroke = null; finishStroke(s); }
+    },
+    palm() { cast('circle'); },
+    hoverable(p) { return choosing ? pickW(p) : null; },
     update(dt, t) {
       mixers.forEach(m => m.update(dt));
       if (intro.on) {
@@ -938,73 +1062,88 @@ function orlando(ctx, opt) {
       lamps.forEach((l, i) => l.scale.setScalar(1.6 + Math.sin(t * 9 + i) * 0.12));
       candles.forEach(c => { c.position.y += Math.sin(t * 1.3 + c.userData.ph) * 0.003; });
       castle.traverse(o => { if (o.userData.flag) o.rotation.y = Math.sin(t * 2.5) * 0.3; });
-      runes.rotation.z += dt * 0.3; runes.material.opacity = 0.5 + Math.sin(t * 2) * 0.2;
-      // varita
-      cd = Math.max(0, cd - dt); shieldCd = Math.max(0, shieldCd - dt); shieldT = Math.max(0, shieldT - dt);
-      btns[2].classList.toggle('cool', shieldCd > 0 && shieldT <= 0);
-      shield.visible = shieldT > 0; hex.rotation.z += dt; shield.scale.setScalar(Math.min(1, (1.7 - shieldT) * 6) * (1 + Math.sin(t * 20) * 0.02));
+      runes.rotation.z += dt * (turn ? 1.2 : 0.3); runes.material.opacity = 0.5 + Math.sin(t * (turn ? 6 : 2)) * 0.2;
+      drawTrail(dt);
+      // varita y escudo
+      cd = Math.max(0, cd - dt); shieldT = Math.max(0, shieldT - dt); lock = Math.max(0, lock - dt);
+      shield.visible = shieldT > 0; shOn = shield.visible ? shOn + dt : 0; hex.rotation.z += dt; shield.scale.setScalar(Math.min(1, shOn * 6) * (1 + Math.sin(t * 20) * 0.02));
       kick = Math.max(0, kick - dt * 5);
       const n = ctx.ptr.ndc, hh = 0.45 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hw = hh * camera.aspect;
       wand.visible = !intro.on && !choosing;
       if (choosing) { hoverW = pickW(ctx.ptr); picks.forEach(h => { h.rotation.y += dt * 1.2; h.scale.setScalar(h.userData.i === hoverW ? 1.25 : 1); }); if (hoverW !== null && hoverW !== undefined) ctx.info(`🪄 ${WANDS[hoverW].name} — ${WANDS[hoverW].note}`); }
       wand.position.set((n.x * 0.5 + 0.38) * hw, (n.y * 0.4 - 0.58) * hh, -0.42);
-      wand.lookAt(aimPoint()); wand.rotateX(-kick * 0.5);
+      wand.lookAt(en.localToWorld(_v.set(0, 1.2, 0))); wand.rotateX(-kick * 0.5);
+      if (!kick && turn) tip.material.color.set(SP[turn.need].col);
       const cw = camW();
       for (let i = flying.length - 1; i >= 0; i--) { const f = flying[i], u = f.userData; u.life -= dt; u.v.y -= 9 * dt; f.position.addScaledVector(u.v, dt); f.rotation.x += dt * 12; if (f.position.y < 0.05) { f.position.y = 0.05; u.v.set(0, 0, 0); } if (u.life <= 0) remove(flying, i); }
+      for (let i = bolts.length - 1; i >= 0; i--) { const b = bolts[i]; b.life -= dt; b.ln.material.opacity = b.life * 3.5; if (b.life <= 0) { g.remove(b.ln); disposeTree(b.ln); bolts.splice(i, 1); } }
       if (en.visible) {
         en.lookAt(cw.x, 0, cw.z); E.bar.lookAt(cw); E.cape.rotation.y = Math.sin(t * 1.7) * 0.08;
+        if (turn && turn.type === 'open') en.rotateZ(Math.sin(t * 5) * 0.08); // baja la guardia y se tambalea
         stunStars.forEach((s, i) => { s.visible = stun > 0; const a = t * 4 + i * 2.1; s.position.set(Math.cos(a) * 0.35, 2.15, Math.sin(a) * 0.35); s.rotation.y += dt * 5; });
       }
       if (dead) {
         dead += dt; en.scale.setScalar(Math.max(0.01, 1 - dead * 1.2)); en.rotation.y += dt * 14; en.position.y += dt * 0.6;
         if (Math.random() < 0.7) ctx.burst(en.localToWorld(_v.set(0, 1, 0)), [0x9b5cff, 0xffd700], 4, 1.5);
-        if (dead > 0.9 && !won) { won = true; en.visible = false; ctx.win('orlando'); }
+        if (dead > 0.9 && !won) {
+          won = true; en.visible = false; rune.visible = false; barrier.visible = false;
+          const secs = Math.round(duelT), medal = hp >= 4 ? 'oro' : hp >= 3 ? 'plata' : 'bronce', b = ctx.best('orlando', secs, true);
+          ctx.win('orlando', { medal, line: `✨ 6 hechizos en ${secs} s · ${'❤️'.repeat(hp)}`, record: b.isNew ? '¡NUEVO RÉCORD!' : `RÉCORD: ${b.best} s` });
+        }
       } else if (running) {
-        stun = Math.max(0, stun - dt); disarm = Math.max(0, disarm - dt);
+        duelT += dt; stun = Math.max(0, stun - dt); disarm = Math.max(0, disarm - dt);
         if (!disarm) E.wand.visible = true;
         if (!stun && !disarm) E.robeM.emissive.lerp(_u.set(0, 0, 0), dt * 3);
-        if (!stun) { moveT -= dt; if (moveT <= 0) { moveT = hits >= 3 ? rnd(0.9, 1.6) : rnd(1.6, 2.8); tx = rnd(-3.5, 3.5); } en.position.x = lerp(en.position.x, tx, dt * (hits >= 3 ? 2.6 : 1.5)); en.position.y = Math.sin(t * 2) * 0.05; }
-        if (!stun && !disarm) {
-          fireT -= dt;
-          if (fireT < 0.9) { if (!charge) ctx.sfx('charge'); charge = 1; }
-          castAnim = lerp(castAnim, fireT < 0.9 ? 1 : 0, dt * 6);
-          E.tip.scale.setScalar(0.25 + (fireT < 0.9 ? (0.9 - fireT) * 0.9 : 0));
-          if (fireT <= 0) {
-            fireT = hits >= 3 ? rnd(1.6, 2.3) : rnd(2.4, 3.3); charge = 0;
+        if (!stun) { moveT -= dt; if (moveT <= 0) { moveT = fast() ? rnd(0.9, 1.6) : rnd(1.6, 2.8); tx = rnd(-3.5, 3.5); } en.position.x = lerp(en.position.x, tx, dt * (fast() ? 2.6 : 1.5) * (barrier.visible ? 0.4 : 1)); en.position.y = Math.sin(t * 2) * 0.05; }
+        if (!turn) { if (!stun && !disarm) { gap -= dt; if (gap <= 0) nextTurn(); } }
+        else {
+          turn.t += dt;
+          rune.position.copy(en.position).setY(3.25); rune.scale.setScalar(Math.min(1.25, turn.t * 6) * (1 + Math.sin(t * 8) * 0.05));
+          if (barrier.visible) { barrier.position.copy(en.position); barrier.scale.setScalar(Math.min(1, turn.t * 4)); barrier.rotation.y += dt * 0.8; }
+          if (turn.type === 'attack' && !turn.fired && turn.t >= turn.win) { // dispara la bola verde
+            turn.fired = true;
             const from = E.tip.getWorldPosition(new V3()), to = cw.clone().add(_v.set(rnd(-0.2, 0.2), -0.1, 0));
             const m = add(g, sph(0.1, 10), B(0x66ff88), from.x, from.y, from.z, false); m.add(glow(0x66ff88, 1.3));
-            foes.push({ m, v: to.sub(from).normalize().multiplyScalar(7) });
-          }
-        } else castAnim = lerp(castAnim, 0, dt * 6);
-        E.arms[1].rotation.x = -castAnim * 1.9; E.arms[1].rotation.z = 0.15 + castAnim * 0.2;
+            foes.push({ m, v: to.sub(from).normalize().multiplyScalar(DUEL.bolt * (fast() ? 1.25 : 1)) });
+          } else if (turn.type !== 'attack' && !turn.done && turn.t >= turn.win) endTurn(true);
+        }
+        const charging = !!turn && turn.type === 'attack' && !turn.fired;
+        castAnim = lerp(castAnim, charging ? 1 : 0, dt * 6);
+        E.tip.scale.setScalar(0.25 + (charging ? Math.min(1, turn.t / turn.win) * 0.8 : 0));
+        E.arms[1].rotation.x = -castAnim * 1.9 + (turn && turn.type === 'open' ? 0.5 : 0); E.arms[1].rotation.z = 0.15 + castAnim * 0.2;
         E.arms[0].rotation.x = Math.sin(t * 1.5) * 0.08;
       }
       for (let i = shots.length - 1; i >= 0; i--) {
         const s = shots[i]; s.life -= dt;
         enC.copy(en.position).setY(1.15);
-        if (s.assist && !dead) { _v.copy(enC).sub(s.m.position).normalize().multiplyScalar(W.sp); s.v.lerp(_v, 0.15); }
+        if (!dead) { _v.copy(enC).sub(s.m.position).normalize().multiplyScalar(s.v.length()); s.v.lerp(_v, 0.2); } // siempre busca al mago
         s.m.position.addScaledVector(s.v, dt);
-        ctx.burst(s.m.position, COL[s.kind], 1, 0.25);
-        if (!dead && running && en.visible && s.m.position.distanceTo(enC) < W.hit) { enemyHit(s.kind); remove(shots, i); }
-        else if (s.life <= 0) remove(shots, i);
+        ctx.burst(s.m.position, s.col, 1, 0.25);
+        if (!dead && en.visible && s.m.position.distanceTo(enC) < 0.7) { if (s.ok && running) enemyHit(s.kind); else deflect(); remove(shots, i); }
+        else if (s.life <= 0) { remove(shots, i); if (s.ok && turn) endTurn(true); }
       }
       for (let i = foes.length - 1; i >= 0; i--) {
         const f = foes[i]; f.m.position.addScaledVector(f.v, dt);
         ctx.burst(f.m.position, 0x66ff88, 1, 0.2);
         if (f.m.position.distanceTo(camW()) < 0.85) {
-          if (shieldT > 0) { ctx.sfx('block'); ctx.burst(f.m.position, [0x66ccff, 0xffffff], 40, 1.6); }
-          else if (running) {
-            hp--; ctx.sfx('hurt'); ctx.flash(); info();
-            if (hp <= 0) { running = false; ctx.lose('El mago enemigo te derrotó. Consejo: cuando veas el brillo verde, activa 🛡️ Protego.'); }
+          if (shieldT > 0 && running) { // ¡bloqueado! la bola rebota hacia el mago
+            ctx.sfx('block'); ctx.burst(f.m.position, [0x66ccff, 0xffffff], 40, 1.6); shieldT = 0.4;
+            enC.copy(en.position).setY(1.15);
+            const m = add(g, sph(0.1, 10), B(0x66ccff), f.m.position.x, f.m.position.y, f.m.position.z, false); m.add(glow(0x66ccff, 1.3));
+            shots.push({ m, v: enC.clone().sub(f.m.position).normalize().multiplyScalar(11), ok: true, kind: 'circle', col: 0x66ccff, life: 2 });
+          } else if (running) {
+            hp--; combo = 0; ctx.sfx('hurt'); ctx.flash(); ctx.shake(0.5); info(); endTurn(false);
+            if (hp <= 0) { running = false; legend(null); ctx.lose('El mago te derrotó. Consejo: dibuja la figura que muestra la runa. Con la runa ⭕, dibuja el círculo antes de que llegue la bola verde.'); }
+            else ctx.pop('¡AUCH!', 'bad');
           }
           remove(foes, i);
-        } else if (f.m.position.z > camW().z + 3) remove(foes, i);
+        } else if (f.m.position.z > camW().z + 3) { remove(foes, i); if (turn && turn.type === 'attack') endTurn(false); }
       }
     },
     dispose() {
       alive = false; running = false; restoreEnv();
       camera.remove(wand); camera.remove(shield); camera.remove(shelf); disposeTree(wand); disposeTree(shield); disposeTree(shelf);
-      ui.classList.add('hidden'); document.getElementById('crosshair').classList.add('hidden');
+      ui.classList.add('hidden'); document.body.classList.remove('hasbar'); legend(null); cv.remove(); document.getElementById('crosshair').classList.add('hidden');
     }
   };
 }
@@ -1925,9 +2064,9 @@ function heat(ctx, opt) {
 export const GAMES = {
   orlando: {
     short: 'Orlando', title: '🏰 Orlando — Duelo mágico', pix: 'DUELO MÁGICO', tag: 'ORLANDO · PARQUE MÁGICO', winMsg: '¡Has conquistado Orlando!', create: orlando,
-    how: h => h
-      ? 'Tu varita sigue tu <b>dedo índice</b>. Apunta al mago y mantén el dedo sobre él: el hechizo se lanza solo. Muestra la <b>palma abierta ✋</b> para activar 🛡️ Protego cuando veas el brillo verde. Cambia de hechizo dejando el dedo quieto sobre los botones. <b>Acierta 6 ataques</b> (a la mitad el mago se enfurece y ataca más rápido).'
-      : 'Toca al mago para lanzarle el hechizo (o usa ✨ Lanzar). 🔴 Expelliarmus lo desarma y ⚡ Stupefy lo aturde. Cuando veas el brillo verde, elige 🛡️ Protego y lánzalo. Gira el celular o arrastra para mirar el parque. <b>Acierta 6 ataques</b> (a la mitad el mago se enfurece y ataca más rápido).',
+    how: h => 'Encima del mago aparece una <b>runa</b> con una figura. <b>Dibuja esa misma figura</b> ' + (h ? 'en el aire con tu <b>índice</b> (muévelo rápido y luego déjalo quieto)' : 'con el dedo en la pantalla') + ':'
+      + '<ol class="steps"><li>⚡ <b>Zigzag</b> = rayo: rompe su barrera de cristal.</li><li>➖ <b>Línea</b> = desarme: cuando baja la guardia.</li><li>⭕ <b>Círculo</b> = escudo: antes de que llegue su bola verde (¡la rebota!)' + (h ? '. También sirve la palma abierta ✋.' : '.') + '</li></ol>'
+      + 'Toca las figuras de abajo para ver cómo se dibujan. <b>Acierta 6 hechizos</b>; a la mitad el mago se enfurece y va más rápido.',
     fact: 'The Wizarding World of Harry Potter abrió su zona de Hogsmeade en Islands of Adventure en 2010 y Diagon Alley en Universal Studios Florida en 2014. El tren Hogwarts Express conecta ambos parques.'
   },
   miami: {

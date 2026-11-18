@@ -47,8 +47,12 @@
 | Juego | Estado |
 |---|---|
 | Miami Heat | Fase 1: driblar, tiro con medidor (zona verde), racha EN LLAMAS, medalla por tiempo |
-| Penales y fútbol americano | Fase 1: patear con la cámara trasera sobre tu piso real |
-| Orlando, Héroes, Miami urbano, tour acuático | Fase 2 (rediseño de mecánicas) |
+| Penales | Fase 2: 3 porteros (🐢 lento, 🎲 adivinador que se inclina hacia su lado, 🐆 felino), esquina dorada x2 en cada tiro, medalla por puntos |
+| Fútbol americano | Fase 2: en cada ronda 3 jugadores empujan los postes a la izquierda o a la derecha (la cámara sube para verlo) |
+| Orlando | Fase 2: duelo por gestos. La runa del mago pide ⚡ zigzag (rompe su barrera), ➖ línea (desarme) o ⭕ círculo (escudo que rebota su bola). Combos y fase de furia |
+| Isla de Héroes | Fase 2: oleadas de 1, 2 y 2 drones que disparan (🛡️ CUBRIRSE o palma abierta), jefe final con burbuja a media vida, 3 ❤️ |
+| Miami urbano | Sin cambios (decisión de Cielo) |
+| Tour acuático | Como antes de la actualización: lancha y moto hechas por código (los FBX de lancha y moto no se cargan) |
 
 ## 8. Decisiones
 | Fecha | Decisión | Por qué |
@@ -62,3 +66,7 @@
 | 2026-11-18 | Los textos en fuente pixel van sin tildes (la ñ sí se conserva) | «Press Start 2P» no trae Á, Ó, Ú: mezclaba dos fuentes |
 | 2026-11-18 | El zoom con dos dedos queda bloqueado | en un juego táctil el gesto de zoom rompe los controles |
 | 2026-11-18 | Medallas: baloncesto por tiempo (≤45 s oro, ≤75 s plata); penales y fútbol americano por intentos | recompensa extra sin cambiar la condición de la estrella |
+| 2026-11-18 | Fase 2 elegida por Cielo: penales con porteros y esquina x2; postes que se mueven empujados (no viento); Orlando por gestos; Héroes con oleadas y jefe; Miami urbano igual; tour acuático como antes | respuesta de Cielo al plan de la fase 2 |
+| 2026-11-18 | Penales: ningún portero que se lanza alcanza el ángulo (esquinas de arriba); medalla oro ≥500 pts, plata ≥400 pts o 3 de 3 | da una salida al portero felino y premia la esquina dorada |
+| 2026-11-18 | Orlando: los hechizos se llaman Rayo, Desarme y Escudo (sin nombres de Harry Potter); con la mano hay 30 % más de tiempo por runa | evitar nombres protegidos; dibujar en el aire es más lento |
+| 2026-11-18 | Héroes: la estrella pide los 5 drones y además el jefe; medalla por corazones (3 oro, 2 plata, 1 bronce) | el jefe es el clímax aprobado; se mantienen los 5 drones |

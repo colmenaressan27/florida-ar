@@ -227,26 +227,58 @@ function heroes(ctx, opt) {
   const seats = new THREE.Group(); tw.add(seats); add(seats, cyl(2.4, 2.4, 1.2, 16), M(0xffd23a, { metalness: 0.4, roughness: 0.4 }), 0, 0, 0);
   const arch = add(g, new THREE.TorusGeometry(6, 0.6, 12, 40, Math.PI), M(0xd4202a, { metalness: 0.5, roughness: 0.3 }), 0, 0, 12); arch.rotation.y = Math.PI;
   add(g, new THREE.PlaneGeometry(9, 1.6), temp(new THREE.MeshStandardMaterial({ map: textTex('ISLA DE HÉROES', 1024, 180, '#111a4a', '#ffe14d', 'bold 96px Impact,system-ui'), emissive: 0x222200, side: THREE.DoubleSide })), 0, 7, 12, false);
-  // drones enemigos: aparecen de uno en uno FRENTE a ti y se marcan con un aro rojo
+  // drones enemigos (fase 2): llegan en oleadas y al final aparece el JEFE. Cuando un dron brilla, te dispara una bola roja: ¡cúbrete!
+  // WAVES = drones por oleada (suman 5). HZ = ajustes: vida, cada cuánto disparan (s), aviso antes del disparo (s), velocidad de la bola (m/s), pausa mínima entre disparos de distintos drones (s)
+  const WAVES = [1, 2, 2];
+  const HZ = { hp: [2, 3, 3], bossHp: 8, first: [1.0, 1.8], every: [4.2, 6.0], charge: 1.0, shotSp: 8, gap: 3.6, hearts: 3 }; // hp = golpes por dron en las oleadas 1, 2 y 3 · first = primer disparo (s) · every = cada cuánto dispara un dron · gap = pausa mínima entre disparos de distintos drones
   const ringT = canvasTex(128, 128, (q) => { q.strokeStyle = '#ff2a2a'; q.lineWidth = 10; q.beginPath(); q.arc(64, 64, 52, 0, 7); q.stroke(); q.lineWidth = 6; for (const a of [0, 1.57, 3.14, 4.71]) { q.beginPath(); q.moveTo(64 + Math.cos(a) * 40, 64 + Math.sin(a) * 40); q.lineTo(64 + Math.cos(a) * 62, 64 + Math.sin(a) * 62); q.stroke(); } });
   const reticle = new THREE.Sprite(temp(new THREE.SpriteMaterial({ map: ringT, transparent: true, depthTest: false }))); reticle.scale.setScalar(2.4); reticle.visible = false; reticle.renderOrder = 9; g.add(reticle);
-  const drones = Array.from({ length: 5 }, () => { const d = drone(); d.visible = false; d.userData.hp = 2; g.add(d); return d; });
-  let cur = -1, baseYaw = 0, spawnT = 0;
-  function spawn() {
-    cur++; if (cur >= 5) return;
-    const d = drones[cur], f = new V3(0, 0, -1).applyQuaternion(camera.quaternion); baseYaw = Math.atan2(f.x, -f.z);
-    d.visible = true; d.userData.hp = 2; d.userData.t0 = 0; d.scale.setScalar(0.01);
-    ctx.sfx('charge'); ctx.toast(`🚨 ¡Dron ${cur + 1} de 5 a la vista! Está marcado con el aro rojo.`, 2500); info();
+  const drones = Array.from({ length: 5 }, () => { const d = drone(); d.visible = false; g.add(d); return d; });
+  // el JEFE: un dron gigante con anillo y tres ojos; a media vida se cubre con una burbuja
+  const boss = drone(); boss.visible = false; boss.userData.boss = true; g.add(boss);
+  add(boss, new THREE.TorusGeometry(0.75, 0.06, 8, 40), M(0xb36bff, { emissive: 0x8a2ad4, emissiveIntensity: 1.6 }), 0, 0, 0, false).rotation.x = Math.PI / 2;
+  for (const x of [-0.22, 0.22]) add(boss, sph(0.08, 10), M(0xff2a2a, { emissive: 0xff1010, emissiveIntensity: 2.5 }), x, 0.12, 0.33, false);
+  for (let k = 0; k < 5; k++) add(boss, cone(0.06, 0.25, 6), M(0xffd23a, { metalness: 0.8 }), Math.cos(k / 5 * 6.28) * 0.3, 0.32, Math.sin(k / 5 * 6.28) * 0.3, false);
+  const bubble = add(boss, sph(0.95, 24), temp(new THREE.MeshBasicMaterial({ color: 0x24d1ff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false })), 0, 0, 0, false); bubble.visible = false;
+  // bolas rojas de los drones (se reutilizan)
+  const balls = Array.from({ length: 6 }, () => { const b = new THREE.Group(); add(b, sph(0.18, 12), M(0xff3a2a, { emissive: 0xff2010, emissiveIntensity: 2.5 }), 0, 0, 0, false); b.add(glow(0xff4030, 1.4, 0.8)); b.visible = false; b.userData.v = new V3(); g.add(b); return b; });
+  // campo de fuerza para cubrirte
+  const field = new THREE.Group(); field.position.set(0, -0.05, -0.55); field.visible = false; camera.add(field);
+  add(field, new THREE.CircleGeometry(0.5, 48), temp(new THREE.MeshBasicMaterial({ color: 0x24d1ff, transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })), 0, 0, 0, false);
+  const fHex = add(field, new THREE.IcosahedronGeometry(0.5, 1), temp(new THREE.MeshBasicMaterial({ color: 0x9feaff, wireframe: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })), 0, 0, 0, false); fHex.scale.z = 0.25;
+  let wave = -1, waveT = 0, baseYaw = 0, killed = 0, hearts = HZ.hearts, combo = 0, egap = 0, bossOn = false, bossShield = 0, bossHalf = false, time = 0;
+  const ALL = [...drones, boss];
+  const alive = () => (bossOn ? [boss] : drones).filter(d => d.visible && !d.userData.dead);
+  const amp = () => (ctx.gyroOn() ? 1 : 0.55); // sin giroscopio no puedes girar: los drones se quedan más al frente
+  function launch(d, off, pat) {
+    const u = d.userData; Object.assign(u, { hp: u.boss ? HZ.bossHp : HZ.hp[Math.min(pat, 2)], t0: 0, off, pat, dead: 0, wob: 0, charge: 0, burst: 0, next: rnd(HZ.first[0], HZ.first[1]) + Math.abs(off) * 3 });
+    d.visible = true; d.scale.setScalar(0.01);
+  }
+  function startWave(i) {
+    wave = i; const f = new V3(0, 0, -1).applyQuaternion(camera.quaternion); baseYaw = Math.atan2(f.x, -f.z);
+    if (i < WAVES.length) {
+      const n = WAVES[i], offs = n === 1 ? [0] : [-0.28, 0.28];
+      for (let k = 0; k < n; k++) launch(drones[killed + k], offs[k], i);
+      ctx.pop(`OLEADA ${i + 1}`, 'small'); ctx.sfx('charge');
+      ctx.toast(i === 0 ? '🚨 ¡Dron a la vista! Atácalo. Si te dispara, mantén 🛡️ CUBRIRSE.' : `🚨 ¡Oleada ${i + 1}: ${n} drones!`, 2600);
+    } else { // jefe final
+      bossOn = true; launch(boss, 0, 9); ctx.pop('¡JEFE FINAL!', 'fire'); ctx.sfx('buzzer'); ctx.shake(0.4);
+      ctx.toast('👾 ¡El JEFE! Dispara ráfagas y a media vida se cubre con una burbuja.', 3200);
+    }
+    info();
   }
   // armas: vista previa giratoria + botones grandes para elegir
   const shelf = new THREE.Group(); shelf.position.set(0, 0.02, -0.8); shelf.visible = false; camera.add(shelf);
   const picks = WEAPONS.map((w, i) => { const h = new THREE.Group(); h.position.x = (i - 1) * 0.11; h.scale.setScalar(0.2); shelf.add(h); h.add(weaponModel(i)); h.add(glow(w.col, 0.5, 0.4)); return h; });
   const bar = document.createElement('div'); bar.id = 'pickbar'; bar.className = 'hidden'; document.getElementById('app').appendChild(bar);
-  const ICON = ['⚡', '🏹', '🛡️'], VERB = ['⚡ LANZAR RAYO', '🏹 DISPARAR FLECHA', '🛡️ LANZAR ESCUDO'];
+  const ICON = ['⚡', '🏹', '🛡️'], VERB = ['⚡ RAYO', '🏹 FLECHA', '🛡️ LANZAR ESCUDO'];
   const hand = new THREE.Group(); hand.scale.setScalar(0.55); camera.add(hand);
-  let wi = -1, held = null, running = false, killed = 0, cd = 0, kick = 0, draw = 0, drawing = false;
+  let wi = -1, held = null, running = false, cd = 0, kick = 0, draw = 0, drawing = false, holdCover = false, coverT = 0, warnT = 0, attackBtn = null, coverBtn = null;
+  const covering = () => holdCover || coverT > 0;
   const bolts = [], arrows = [], sh = { state: 'held', obj: null, tgt: null };
-  const info = () => ctx.info(wi < 0 ? '🦸 Elige tu arma' : `🎯 Dron ${Math.min(cur + 1, 5)}/5 · ${'❤️'.repeat(cur >= 0 && cur < 5 ? drones[cur].userData.hp : 0)} · Derribados ${killed}`);
+  const info = () => ctx.info(wi < 0 ? '🦸 Elige tu arma' : bossOn
+    ? `👾 JEFE ${'▰'.repeat(Math.max(0, boss.userData.hp))}${'▱'.repeat(HZ.bossHp - Math.max(0, boss.userData.hp))} · ${'❤️'.repeat(hearts)}${'🖤'.repeat(HZ.hearts - hearts)}`
+    : `🌊 Oleada ${Math.max(1, wave + 1)}/3 · ${'❤️'.repeat(hearts)}${'🖤'.repeat(HZ.hearts - hearts)} · Drones ${killed}/5${combo >= 2 ? ` · 🔥 x${combo}` : ''}`);
   function showPick() {
     bar.innerHTML = WEAPONS.map((w, i) => `<button data-i="${i}"><b>${ICON[i]} ${w.name}</b><span>${w.note}</span></button>`).join('');
     bar.querySelectorAll('button').forEach(b => (b.onclick = () => choose(+b.dataset.i)));
@@ -254,22 +286,41 @@ function heroes(ctx, opt) {
   }
   function choose(i) {
     wi = i; shelf.visible = false; held = weaponModel(i); holdPose(held, i); hand.add(held); if (i === 2) sh.obj = held;
-    bar.innerHTML = `<button class="attack">${VERB[i]}</button>`; bar.querySelector('button').onclick = () => fire();
-    running = true; ctx.sfx('pickup'); refreshHint(); spawn();
+    bar.innerHTML = `<button class="attack">${VERB[i]}</button><button class="cover">🛡️ CUBRIRSE</button>`;
+    attackBtn = bar.querySelector('.attack'); coverBtn = bar.querySelector('.cover');
+    attackBtn.onclick = () => fire();
+    const on = e => { e.preventDefault(); holdCover = true; }, off = () => { if (holdCover) coverT = Math.max(coverT, 0.25); holdCover = false; }; // al soltar queda 0.25 s de margen
+    coverBtn.addEventListener('pointerdown', on); ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => coverBtn.addEventListener(n, off));
+    running = true; time = 0; ctx.sfx('pickup'); refreshHint(); startWave(0);
+  }
+  function target() { // el dron más cercano al centro de la pantalla
+    const f = _w.set(0, 0, -1).applyQuaternion(camera.quaternion); let best = null, bd = -2;
+    for (const d of alive()) { if (d.userData.t0 < 0.7) continue; const c = _v.copy(d.position).sub(camera.position).normalize().dot(f); if (c > bd) { bd = c; best = d; } }
+    return best;
   }
   function hitDrone(d) {
     if (!d || !d.visible || d.userData.dead) return;
-    d.userData.hp--; ctx.burst(d.position, [0x7fd8ff, 0xffffff, 0xffa020], 30, 2); ctx.sfx('hit'); d.userData.wob = 1;
-    if (d.userData.hp <= 0) {
-      d.userData.dead = 0.001; killed++; ctx.burst(d.position, [0xffa020, 0xff3030, 0xffffff], 80, 3.2); reticle.visible = false;
-      if (killed >= 5) { running = false; bar.classList.add('hidden'); setTimeout(() => ctx.win('heroes'), 1300); }
-      else { ctx.toast(`💥 ¡Derribado! ${killed}/5`, 1600); spawnT = 1.4; }
+    const u = d.userData;
+    if (u.boss && bossShield > 0) { ctx.sfx('block'); ctx.burst(d.position, [0x24d1ff, 0xffffff], 25, 2); ctx.pop('¡BURBUJA!', 'small'); return; }
+    u.hp--; ctx.burst(d.position, [0x7fd8ff, 0xffffff, 0xffa020], 30, 2); ctx.sfx('hit'); u.wob = 1;
+    if (u.boss && !bossHalf && u.hp <= HZ.bossHp / 2) { bossHalf = true; bossShield = 2.6; bubble.visible = true; u.burst = 3; u.bt = 0.8; ctx.pop('¡BURBUJA!', 'bad'); ctx.toast('🫧 Se cubrió: espera a que se rompa la burbuja.', 2200); }
+    if (u.hp <= 0) {
+      u.dead = 0.001; combo++; ctx.burst(d.position, [0xffa020, 0xff3030, 0xffffff], u.boss ? 220 : 80, u.boss ? 5 : 3.2); ctx.shake(u.boss ? 0.8 : 0.3);
+      if (u.boss) { running = false; bar.classList.add('hidden'); ctx.slowmo(1, 0.3); ctx.pop('¡JEFE DERROTADO!', 'fire'); ctx.sfx('perfect'); finish(); }
+      else {
+        killed++; ctx.pop(combo >= 3 ? `¡DERRIBADO! x${combo}` : '¡DERRIBADO!', combo >= 3 ? 'fire' : 'good');
+        if (!alive().length) { waveT = 1.8; if (wave + 1 < WAVES.length) setTimeout(() => running && ctx.pop('¡OLEADA SUPERADA!', 'good'), 600); }
+      }
     }
     info();
   }
-  function fire() {
-    if (!running || cd > 0) return;
-    const d = drones[cur]; if (!d || !d.visible || d.userData.dead) return;
+  function finish() {
+    const secs = Math.round(time), medal = hearts >= 3 ? 'oro' : hearts >= 2 ? 'plata' : 'bronce', b = ctx.best('heroes', secs, true);
+    setTimeout(() => ctx.win('heroes', { medal, line: `🦸 5 drones y el jefe en ${secs} s · ${'❤️'.repeat(hearts)}`, record: b.isNew ? '¡NUEVO RÉCORD!' : `RÉCORD: ${b.best} s` }), 1500);
+  }
+  function fire(d) {
+    if (!running || cd > 0 || covering()) return;
+    d = d || target(); if (!d || !d.visible || d.userData.dead) return;
     const from = held.getWorldPosition(new V3()), tp = d.position.clone();
     if (wi === 0) {
       cd = 0.7; kick = 1; ctx.sfx('spell');
@@ -288,55 +339,106 @@ function heroes(ctx, opt) {
       sh.state = 'go'; sh.tgt = d; hand.remove(sh.obj); g.add(sh.obj); sh.obj.position.copy(from); sh.obj.scale.setScalar(1.6); ctx.sfx('throw');
     }
   }
+  function enemyShot(d) { // el dron dispara una bola roja hacia ti
+    const b = balls.find(x => !x.visible); if (!b) return;
+    b.visible = true; b.position.copy(d.position);
+    b.userData.v.copy(camera.position).add(_v.set(rnd(-0.25, 0.25), -0.15, 0)).sub(d.position).normalize().multiplyScalar(HZ.shotSp * (bossOn ? 1.2 : 1));
+    ctx.sfx('throw');
+  }
   const intro = withIntro(ctx, opt, [{ t: 0, p: [0, 1.6, 26], yaw: 0, pitch: 0.2 }, { t: 3.5, p: [0, 1.6, 4], yaw: 0, pitch: 0.12 }, { t: 7.5, p: [0, 1.6, 0], yaw: Math.PI * 2, pitch: 0.1 }], 0, 0.1);
   const refreshHint = () => ctx.hint(wi < 0 ? 'Elige tu arma con los botones de abajo 👇'
-    : `Pulsa <b>${VERB[wi]}</b> ` + (ctx.isHand() ? 'o haz pinza' : 'o toca la pantalla') + ' para atacar al dron del <b>aro rojo</b>. Cada dron aguanta 2 golpes.');
+    : `Pulsa <b>${VERB[wi]}</b> ` + (ctx.isHand() ? 'o haz pinza' : 'o toca un dron') + ' para atacar (el <b>aro rojo</b> marca a cuál). Cuando venga una bola roja (el botón parpadea), mantén <b>🛡️ CUBRIRSE</b>' + (ctx.isHand() ? ' o muestra la palma ✋.' : '.'));
+  const pickD = p => { let best = null, bd = 4; for (const d of alive()) { if (d.userData.t0 < 0.7) continue; const r = p.ray.ray.distanceSqToPoint(d.position) / (d.userData.boss ? 6 : 1); if (r < bd) { bd = r; best = d; } } return best; };
   return {
-    camLock: !opt.quick, dwellTime: 0.45, refreshHint,
+    camLock: !opt.quick, dwellTime: 0.45, refreshHint, _dbg: { incoming: () => balls.some(b => b.visible) },
     start() { this.camLock = false; info(); refreshHint(); showPick(); },
-    onDown() { if (intro.on) { intro.finish(); this.camLock = false; return; } if (running) fire(); },
+    onDown(p) { if (intro.on) { intro.finish(); this.camLock = false; return; } if (running) fire(p.src === 'hand' ? null : pickD(p)); },
     onMove() {}, onUp() {},
-    tap() { if (intro.on) { intro.finish(); this.camLock = false; return; } fire(); },
-    hoverable(p) { const d = drones[cur]; return running && d && d.visible && !d.userData.dead && p.ray.ray.distanceSqToPoint(d.position) < 4 ? d : null; },
+    palm() { if (running) { coverT = 1.3; ctx.sfx('block'); } }, // con la mano: palma abierta = cubrirte un momento
+    tap(p) { if (intro.on) { intro.finish(); this.camLock = false; return; } fire(pickD(p)); },
+    hoverable(p) { return running ? pickD(p) : null; },
     update(dt, t) {
       if (intro.on) { intro.update(dt); if (!intro.on) this.camLock = false; }
       seats.position.y = 4 + (Math.sin(t * 0.5) * 0.5 + 0.5) ** 3 * 38;
       if (shelf.visible) picks.forEach(h => (h.rotation.y += dt));
-      cd = Math.max(0, cd - dt); kick = Math.max(0, kick - dt * 4);
+      cd = Math.max(0, cd - dt); kick = Math.max(0, kick - dt * 4); coverT = Math.max(0, coverT - dt); egap = Math.max(0, egap - dt); bossShield = Math.max(0, bossShield - dt);
+      if (bubble.visible && bossShield <= 0) { bubble.visible = false; ctx.sfx('block'); ctx.pop('¡AHORA!', 'good'); }
+      if (running) time += dt;
+      // campo de fuerza y botones
+      field.visible = covering(); if (field.visible) { fHex.rotation.z += dt * 1.5; field.scale.setScalar(1 + Math.sin(t * 18) * 0.02); }
+      if (coverBtn) { coverBtn.classList.toggle('on', covering()); coverBtn.classList.toggle('warn', warnT > 0 && !covering()); attackBtn.disabled = covering(); }
+      warnT = 0;
       const n = ctx.ptr.ndc, hh = 0.5 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hw = hh * camera.aspect;
       hand.position.set(0.55 * hw, -0.6 * hh, -0.5);
-      const d = drones[cur];
-      hand.lookAt(d && d.visible ? d.position : ctx.ptr.ray.ray.at(20, _w)); hand.rotateX(Math.PI / 2 - kick * 0.6);
+      const tg = running ? target() : null;
+      hand.lookAt(tg ? tg.position : ctx.ptr.ray.ray.at(20, _w)); hand.rotateX(Math.PI / 2 - kick * 0.6 + (covering() ? 0.6 : 0));
       if (held && wi === 1) { draw = drawing ? Math.min(1, draw + dt * 3) : Math.max(0, draw - dt * 8); const s = held.getObjectByName('cuerda'); if (s) { const a = s.geometry.attributes.position; a.setZ(1, s.userData.z0 + s.userData.dir * draw * 0.22); a.needsUpdate = true; } }
       if (held && wi === 0 && Math.random() < 0.3) ctx.burst(held.getWorldPosition(_v), 0x7fd8ff, 1, 0.5);
-      if (spawnT > 0) { spawnT -= dt; if (spawnT <= 0) spawn(); }
-      drones.forEach(dr => {
-        const u = dr.userData; if (!dr.visible) return;
+      if (running && waveT > 0) { waveT -= dt; if (waveT <= 0) startWave(wave + 1); }
+      for (const dr of ALL) {
+        const u = dr.userData; if (!dr.visible) continue;
         u.rot.forEach(r => (r.rotation.y += dt * 40));
-        if (u.dead) { u.dead += dt; dr.scale.setScalar(Math.max(0.01, 1 - u.dead * 2)); dr.position.y -= dt * 4; if (u.dead > 0.6) dr.visible = false; return; }
-        u.t0 += dt; const dist = 12 - Math.sin(u.t0 * 0.4) * 3, ang = baseYaw + Math.sin(u.t0 * 0.7) * 0.32;
-        dr.position.set(Math.sin(ang) * dist, 3.2 + Math.sin(u.t0 * 1.3) * 0.9, -Math.cos(ang) * dist);
-        dr.scale.setScalar(Math.min(1.4, u.t0 * 2)); u.wob = Math.max(0, (u.wob || 0) - dt * 2); dr.rotation.z = Math.sin(t * 30) * 0.3 * u.wob;
+        if (u.dead) { u.dead += dt; dr.scale.setScalar(Math.max(0.01, (u.boss ? 3 : 1.4) * (1 - u.dead * 1.6))); dr.position.y -= dt * 4; if (u.dead > 0.6) dr.visible = false; continue; }
+        u.t0 += dt; const A = amp(), T0 = u.t0;
+        // patrones de vuelo: 0 = vaivén suave · 1 = zigzag · 2 = rodea al jugador · 9 = jefe
+        let ang, dist, y;
+        if (u.pat === 0) { ang = Math.sin(T0 * 0.7) * 0.32; dist = 12 - Math.sin(T0 * 0.4) * 3; y = 3.2 + Math.sin(T0 * 1.3) * 0.9; }
+        else if (u.pat === 1) { const tri = 2 * Math.abs(((T0 * 0.45) % 2) - 1) - 1; ang = tri * 0.42; dist = 11; y = 3 + Math.abs(Math.sin(T0 * 2)) * 1.2; }
+        else if (u.pat === 2) { ang = Math.sin(T0 * 0.45 + u.off * 4) * 0.8; dist = 10 + Math.sin(T0 * 0.8) * 1.5; y = 3.6 + Math.sin(T0 * 1.7) * 0.6; }
+        else { ang = Math.sin(T0 * 0.35) * 0.35; dist = 16 - Math.sin(T0 * 0.5) * 2; y = 5 + Math.sin(T0 * 0.9) * 0.8; }
+        ang = baseYaw + u.off * A + ang * A;
+        dr.position.set(Math.sin(ang) * dist, y, -Math.cos(ang) * dist);
+        const full = u.boss ? 3 : 1.4; u.wob = Math.max(0, (u.wob || 0) - dt * 2); dr.rotation.z = Math.sin(t * 30) * 0.3 * u.wob;
         dr.lookAt(camera.position);
-        reticle.visible = true; reticle.position.copy(dr.position); reticle.scale.setScalar(2.4 + Math.sin(t * 6) * 0.25); reticle.material.rotation += dt;
-      });
+        // disparo: el ojo brilla y crece (aviso) y luego sale la bola roja
+        let s = Math.min(full, u.t0 * 2 * full / 1.4);
+        if (running && u.t0 > 0.8) {
+          u.next -= dt;
+          if (!u.charge && !u.burst && u.next <= 0 && egap <= 0) { u.charge = 0.001; egap = HZ.gap * (bossOn ? 0.6 : 1); ctx.sfx('charge'); }
+          if (u.charge) {
+            u.charge += dt; s *= 1 + Math.sin(u.charge * 30) * 0.06;
+            ctx.burst(dr.position, 0xff3a2a, 1, 0.8);
+            if (u.charge >= HZ.charge * (bossOn ? 0.8 : 1)) { u.charge = 0; u.burst = u.boss ? (u.burst || 2) : 1; u.bt = 0; }
+          }
+          if (u.burst) { warnT = 1; u.bt -= dt; if (u.bt <= 0) { enemyShot(dr); u.burst--; u.bt = 0.35; if (!u.burst) u.next = rnd(HZ.every[0], HZ.every[1]) * (u.boss ? 0.7 : 1); } }
+        }
+        dr.scale.setScalar(s);
+      }
+      if (tg && running) { reticle.visible = true; reticle.position.copy(tg.position); reticle.scale.setScalar((tg.userData.boss ? 5.5 : 2.4) + Math.sin(t * 6) * 0.25); reticle.material.rotation += dt; }
+      else reticle.visible = false;
+      // bolas rojas: si llegan y no estás cubierto, pierdes un corazón
+      for (const b of balls) {
+        if (!b.visible) continue;
+        b.position.addScaledVector(b.userData.v, dt); warnT = 1;
+        if (b.position.distanceTo(camera.position) < 1.0) {
+          b.visible = false;
+          if (!running) continue;
+          if (covering()) { ctx.sfx('block'); ctx.burst(b.position, [0x24d1ff, 0xffffff], 30, 1.8); ctx.pop('¡BLOQUEADO!', 'small'); }
+          else {
+            hearts--; combo = 0; ctx.sfx('hurt'); ctx.flash(); ctx.shake(0.5); info();
+            if (hearts <= 0) { running = false; bar.classList.add('hidden'); ctx.lose('Los drones te alcanzaron 3 veces. Consejo: cuando venga la bola roja (el botón parpadea), mantén 🛡️ CUBRIRSE hasta que choque.'); }
+            else ctx.pop('¡AUCH!', 'bad');
+          }
+        } else if (b.position.distanceTo(camera.position) > 40) b.visible = false;
+      }
       for (let i = bolts.length - 1; i >= 0; i--) { const b = bolts[i]; b.life -= dt; b.ln.material.opacity = b.life * 4; if (b.life <= 0) { g.remove(b.ln); disposeTree(b.ln); bolts.splice(i, 1); } }
       for (let i = arrows.length - 1; i >= 0; i--) {
         const a = arrows[i]; a.life -= dt; _v.copy(a.d.position).sub(a.m.position); const dd = _v.length();
         a.m.position.addScaledVector(_v.normalize(), Math.min(dd, 30 * dt)); a.m.lookAt(_w.copy(a.m.position).sub(_v));
-        if (dd < 0.7 || a.life <= 0) { if (dd < 0.7) hitDrone(a.d); g.remove(a.m); disposeTree(a.m); arrows.splice(i, 1); }
+        if (dd < (a.d.userData.boss ? 1.4 : 0.7) || a.life <= 0) { if (a.life > 0) hitDrone(a.d); g.remove(a.m); disposeTree(a.m); arrows.splice(i, 1); }
       }
       if (sh.state !== 'held') {
+        if (sh.state === 'go' && (!sh.tgt.visible || sh.tgt.userData.dead)) sh.state = 'back';
         const tp = sh.state === 'go' ? sh.tgt.position : hand.getWorldPosition(new V3());
         _v.copy(tp).sub(sh.obj.position); const dd = _v.length(); sh.obj.position.addScaledVector(_v.normalize(), Math.min(dd, 24 * dt)); sh.obj.rotation.z += dt * 18;
-        if (dd < 0.8) {
+        if (dd < (sh.state === 'go' && sh.tgt.userData.boss ? 1.6 : 0.8)) {
           if (sh.state === 'go') { hitDrone(sh.tgt); ctx.sfx('rim'); sh.state = 'back'; }
           else { g.remove(sh.obj); hand.add(sh.obj); holdPose(sh.obj, 2); sh.state = 'held'; ctx.sfx('block'); }
         }
       }
-      guideArrow(camera, d && d.visible && !d.userData.dead ? d.position : null);
+      guideArrow(camera, tg && running ? tg.position : null);
     },
-    dispose() { running = false; restoreEnv(); guideArrow(camera, null); bar.remove(); document.body.classList.remove('hasbar'); camera.remove(shelf); camera.remove(hand); disposeTree(shelf); disposeTree(hand); }
+    dispose() { running = false; restoreEnv(); guideArrow(camera, null); bar.remove(); document.body.classList.remove('hasbar'); camera.remove(shelf); camera.remove(hand); camera.remove(field); disposeTree(shelf); disposeTree(hand); disposeTree(field); }
   };
 }
 
@@ -365,10 +467,12 @@ function fbBall() { // tu balón FBX: 20 cm de ancho y 35 cm de largo (eje Z)
   return b;
 }
 const POSTS0 = { half: 2.82, bar: 3.05, top: 12.05 }; // medidas de los postes anteriores
-function goalPost(g, z) { // tus postes FBX + banderines arriba
-  const P = modelo('postes', { fallback: goalPostOld }); P.position.z = z; g.add(P);
+function goalPost(g, z) { // tus postes FBX + banderines arriba, en un grupo para poder moverlos de lado
+  const G = new THREE.Group(); G.position.z = z; g.add(G);
+  G.add(modelo('postes', { fallback: goalPostOld }));
   const info = modelInfo('postes') || POSTS0;
-  for (const s of [-1, 1]) { const f = add(g, new THREE.PlaneGeometry(0.3, 1.1), M(0xff6a00, { side: THREE.DoubleSide }), s * info.half, info.top + 0.5, z, false); f.userData.flag = 1; }
+  for (const s of [-1, 1]) { const f = add(G, new THREE.PlaneGeometry(0.3, 1.1), M(0xff6a00, { side: THREE.DoubleSide }), s * info.half, info.top + 0.5, 0, false); f.userData.flag = 1; }
+  return G;
 }
 function goalPostOld() { // postes hechos por código (respaldo mientras carga el modelo)
   const g = new THREE.Group(), z = 0;
@@ -385,7 +489,18 @@ function fg(ctx, opt) {
   const L = 110 * YD, postZ = -L / 2 - 10 * YD + 10 * YD; // postes en la línea de fondo
   const ST = stadium(g, { fieldTex: fbFieldTex(), w: 48.8, l: 120 * YD, cz: 0, crowdCols: [0xf47321, 0xf47321, 0x00843d, 0x00843d, 0xffffff, 0x1d3a8a, 0x111111, 0xd4202a] });
   scene.fog = new THREE.Fog(0x0a1030, 60, 220);
-  const PZ = -60 * YD + 0; goalPost(g, PZ);
+  const PZ = -60 * YD + 0, post = goalPost(g, PZ);
+  // los postes cambian de lado en cada ronda: 3 jugadores los empujan. POST_X = distancias posibles al centro (m)
+  const POST_X = [2.5, 4.5], PUSH_SP = 3.5, CAM_LIFT = 1.8; // PUSH_SP = velocidad del empuje (m/s) · CAM_LIFT = cuánto sube la cámara para verlo (m)
+  const pushers = [[0.6, -0.45], [0.6, 0.45], [1.25, 0]].map(([dx, dz]) => { const P = person({ h: rnd(1.85, 1.95), athlete: true, top: 0xf47321, bottom: 0xffffff, num: String(70 + Math.floor(rnd(0, 9))) }); helmet(P, 0x00843d); P.p.rotation.order = 'YXZ'; P.dx = dx; P.dz = dz; post.add(P.p); return P; });
+  const mv = { on: false, from: 0, to: 0, t: 0, dur: 1, dir: 1 };
+  const placePushers = dir => pushers.forEach(P => { P.p.position.set(-dir * P.dx, 0, P.dz); P.p.rotation.set(0, dir * Math.PI / 2, 0); });
+  placePushers(1);
+  function movePosts() { // elige un lado al azar (izquierda o derecha) distinto de donde están ahora
+    let to; do { to = pick([-1, 1]) * rnd(POST_X[0], POST_X[1]); } while (Math.abs(to - post.position.x) < 2);
+    mv.on = true; mv.landed = false; mv.y0 = camera.position.y; mv.from = post.position.x; mv.to = to; mv.t = 0; mv.dur = clamp(Math.abs(to - mv.from) / PUSH_SP, 1.1, 2.6); mv.dir = Math.sign(to - mv.from);
+    placePushers(mv.dir); ctx.sfx('gate'); ctx.pop(mv.dir > 0 ? '¡POSTES A LA DERECHA! >>' : '<< ¡POSTES A LA IZQUIERDA!', 'small');
+  }
   goalPost(g, 60 * YD);
   const DIST = [20, 30, 40].map(y => y * YD);
   let stage = 0, good = 0, tries = 0, running = false, ball = fbBall(), st = 'rest', vel = new V3(), cel = 0, fbT = 0, crossed = false;
@@ -402,10 +517,11 @@ function fg(ctx, opt) {
     tee.position.z = z; ball.rotation.set(0.35, 0, 0);
     team.forEach((P, i) => { const k = i % 7, def = i >= 7; P.p.position.set((k - 3) * 1.1, 0, z - (def ? 7.5 : 6.3)); P.legs.forEach(l => { l.th.rotation.x = -0.6; l.kn.rotation.x = 0.9; }); P.hips.position.y = P.leg * 0.85; P.arms.forEach(a => { a.sh.rotation.x = def ? -1.6 : -0.4; }); });
     camera.position.set(0, 1.6, z + 4.2); ctx.lookReset(0, 0.04);
+    if (running) movePosts();
     ctx.info(`🏈 Goles ${good}/3 · ${Math.round(DIST[stage] / YD)} yardas · Intentos ${tries}`);
   }
   function kick(vel2) {
-    if (!running || st !== 'rest') return;
+    if (!running || st !== 'rest' || mv.on) return;
     const { pw, lat } = shotFromVel(vel2); tries++; st = 'fly'; slowed = false; ctx.sfx('bounce'); ctx.sfx('throw'); ctx.shake(0.15);
     // alcance según la distancia real desde donde está el balón (en el tee o sobre tu piso) hasta los postes
     const R = (ball.position.z - PZ + 10) * pw, th = 0.66, sp = Math.sqrt(R * 9.8 / Math.sin(2 * th)), ang = lat * 0.32;
@@ -414,13 +530,13 @@ function fg(ctx, opt) {
   }
   let slowed = false;
   const intro = withIntro(ctx, opt, [{ t: 0, p: [18, 14, 30], yaw: 0.6, pitch: -0.3 }, { t: 4, p: [0, 1.6, spotZ() + 4.2], yaw: 0, pitch: 0.04 }], 0, 0.04, () => setup());
-  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea!' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, hacia los postes' : '👆 Pon el dedo y desliza rápido hacia los postes');
+  const startHint = () => ctx.hint(mv.on ? '⏳ ¡Están moviendo los postes! Espera a que paren…' : (ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea hacia los postes!' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, inclinado hacia los postes' : '👆 Desliza rápido hacia los postes (inclina el dedo hacia su lado)'));
   const PI0 = modelInfo('postes') || POSTS0; // ancho real de tus postes (centro de cada parante)
   setup();
   return {
-    camLock: !opt.quick, foot: true, refreshHint: startHint,
+    camLock: !opt.quick, foot: true, refreshHint: startHint, _dbg: { postX: () => post.position.x, moving: () => mv.on, dist: () => ball.position.z - PZ },
     start() { running = true; this.camLock = false; setup(); startHint(); },
-    canKick: () => running && st === 'rest' && (!ctx.footOn() || ball.visible),
+    canKick: () => running && st === 'rest' && !mv.on && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
     onMove(p) { if (running && p.src === 'hand' && !ctx.footOn()) { const v = flick(p); if (v) kick(v); } },
     onUp(p) { if (!running || p.src === 'hand') return; const v = p.vel(110); if (v.y > 0.9) kick(v); },
@@ -429,6 +545,16 @@ function fg(ctx, opt) {
       if (intro.on) { intro.update(dt); if (!intro.on) this.camLock = false; }
       ST.cheer(t, cel > 0 ? 0.3 : 0.02); cel = Math.max(0, cel - dt);
       g.traverse(o => { if (o.userData.flag) o.rotation.y = Math.sin(t * 3) * 0.4; });
+      if (mv.on) { // los jugadores empujan los postes: inclinados, brazos al frente y piernas corriendo
+        mv.t += dt; const u = Math.min(1, mv.t / mv.dur); post.position.x = lerp(mv.from, mv.to, smooth(u));
+        // la cámara sube un momento (CAM_LIFT metros) para que se vea a los jugadores empujando por encima de la fila, y luego vuelve a bajar
+        const lift = smooth(Math.min(1, mv.t / 0.35)) * (1 - smooth(clamp((mv.t - mv.dur) / 0.4, 0, 1)));
+        camera.position.y = mv.y0 + lift * CAM_LIFT;
+        if (u < 1) pushers.forEach((P, i) => { const ph = t * 11 + i * 2.1; P.p.rotation.x = 0.45; P.arms.forEach(a => { a.sh.rotation.x = -1.35; a.el.rotation.x = -0.35; });
+          P.legs.forEach((l, k) => { const q = Math.sin(ph + k * Math.PI); l.th.rotation.x = q * 0.7 - 0.35; l.kn.rotation.x = 0.35 + Math.max(0, -q) * 0.9; }); });
+        else if (!mv.landed) { mv.landed = true; ctx.sfx('bounce'); pushers.forEach(P => { P.p.rotation.x = 0; P.arms.forEach(a => { a.sh.rotation.x = 0; a.el.rotation.x = 0; }); P.legs.forEach(l => { l.th.rotation.x = 0; l.kn.rotation.x = 0; }); }); }
+        if (mv.t >= mv.dur + 0.4) { mv.on = false; camera.position.y = mv.y0; startHint(); }
+      } else pushers.forEach((P, i) => idleAnim(P, t, i));
       if (cel > 0) { refs[0].arms.forEach(a => (a.sh.rotation.x = -3)); team.slice(0, 7).forEach(P => P.arms.forEach(a => (a.sh.rotation.x = -2.9))); } else idleAnim(ref, t);
       if (st === 'rest' && ctx.footOn() && running) { ctx.floorPlace(ball); ball.rotation.set(0.35, t * 0.6, 0); } // el balón queda anclado a tu piso real
       if (st === 'fly') {
@@ -437,8 +563,8 @@ function fg(ctx, opt) {
         if (!slowed && !crossed && ball.position.z - PZ < 5 && ball.position.y > 2) { slowed = true; ctx.slowmo(0.7, 0.4); } // suspenso: ¿entra o no?
         if (!crossed && pz > PZ && ball.position.z <= PZ) {
           crossed = true;
-          const ok = Math.abs(ball.position.x) < PI0.half && ball.position.y > PI0.bar;
-          if (ok) { good++; cel = 2.5; ctx.sfx('crowd'); ctx.sfx('score'); ctx.shake(0.35); ctx.pop('¡ES BUENO!'); ctx.burst(_v.set(0, 12, PZ), [0xf47321, 0x00843d, 0xffffff, 0xffd400], 120, 4); }
+          const ok = Math.abs(ball.position.x - post.position.x) < PI0.half && ball.position.y > PI0.bar; // los postes pueden estar corridos a un lado
+          if (ok) { good++; cel = 2.5; ctx.sfx('crowd'); ctx.sfx('score'); ctx.shake(0.35); ctx.pop('¡ES BUENO!'); ctx.burst(_v.set(post.position.x, 12, PZ), [0xf47321, 0x00843d, 0xffffff, 0xffd400], 120, 4); }
           else { ctx.sfx('lose'); ctx.pop(ball.position.y <= PI0.bar ? 'LE FALTÓ FUERZA' : '¡DESVIADO!', 'bad'); }
           setTimeout(() => {
             if (!running) return;
@@ -495,12 +621,32 @@ function penalty(ctx, opt) {
   const K = person({ h: 1.9, athlete: true, top: 0x39ff6a, bottom: 0x111111, sleeves: true, shorts: true, num: '1', hairStyle: 'short' });
   K.arms.forEach(a => add(a.el, sph(0.06, 10), M(0xffffff), 0, -0.17 * 1.9, 0, false).scale.set(1.2, 1.4, 0.8));
   K.p.position.set(0, 0, GZ + 0.3); g.add(K.p);
+  // 3 estilos de portero (cambia en cada penal). delay/dur = reacción y velocidad de la estirada; reach = alcance de las manos; read = probabilidad de adivinar tu lado
+  const STY = [
+    { word: 'LENTO', name: '🐢 LENTO', col: '#7fd8ff', delay: 0.25, dur: 0.95, reach: 0.75, read: 0.4, sway: 1, tip: '🐢 Portero LENTO: reacciona tarde. ¡Prueba la esquina dorada x2!' },
+    { word: 'ADIVINADOR', name: '🎲 ADIVINADOR', col: '#ffd23a', delay: 0, dur: 0.45, reach: 1.15, read: -1, sway: 1.6, tip: '🎲 Portero ADIVINADOR: ya eligió su lado y se inclina hacia él. ¡Patea al otro lado!' },
+    { word: 'FELINO', name: '🐆 FELINO', col: '#ff4fa3', delay: 0.04, dur: 0.36, reach: 1.15, read: 0.6, sway: 2.6, tip: '🐆 Portero FELINO: rapidísimo. Lo superas tirando al ángulo (esquinas de arriba).' }
+  ];
+  const ORDER = [0, 1, 2, pick([0, 1, 2]), pick([1, 2])]; // del más fácil al más difícil
+  const tags = STY.map(o => { const l = label(o.name, 0.42, o.col); l.position.y = 2.85; l.visible = false; K.p.add(l); return l; });
+  let sty = STY[0], guess = 0;
+  // esquina dorada: una de las 4 esquinas brilla en cada penal y el gol ahí vale doble
+  const CW = 0.8, CH = 0.6; // medio ancho y media altura de la esquina (m)
+  const CORN = [[-1, 1], [1, 1], [-1, 0], [1, 0]].map(([sx, top]) => ({ x: sx * (GI.half - CW - 0.05), y: top ? GI.bar - CH - 0.04 : CH + 0.04 }));
+  const hotT = canvasTex(256, 192, (q, w, h) => { q.shadowColor = '#ffd23a'; q.shadowBlur = 22; q.strokeStyle = '#ffd23a'; q.lineWidth = 12; q.strokeRect(16, 16, w - 32, h - 32); q.fillStyle = 'rgba(255,210,58,.18)'; q.fillRect(16, 16, w - 32, h - 32); q.shadowBlur = 8; q.fillStyle = '#fff'; q.font = 'bold 60px system-ui,sans-serif'; q.textAlign = 'center'; q.textBaseline = 'middle'; q.fillText('x2', w / 2, h / 2 + 4); });
+  const hotM = add(g, new THREE.PlaneGeometry(CW * 2, CH * 2), temp(new THREE.MeshBasicMaterial({ map: hotT, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })), 0, 0, GZ + 0.05, false);
+  let hot = 0, pts = 0;
   const ball = modelo('balon-futbol', { fallback: () => new THREE.Mesh(sph(0.11, 32), soccerBallMat()), onLoad: o => o.scale.setScalar(0.11) }); g.add(ball);
   let running = false, shots = 0, goals = 0, st = 'rest', vel = new V3(), cel = 0, dive = 0, diveT = 0, kx = 0, res = '', saveX = 0, netK = 0, flyT = 0;
-  const info = () => ctx.info(`⚽ Goles ${goals} · Penal ${Math.min(shots + (st === 'rest' ? 1 : 0), 5)}/5 · Necesitas 3`);
+  const info = () => ctx.info(`⚽ Goles ${goals}/3 · Penal ${Math.min(shots + (st === 'rest' ? 1 : 0), 5)}/5 · ${pts} pts`);
   function setup() {
     st = 'rest'; res = ''; dive = 0; diveT = 0; ball.position.set(0, 0.11, 0); ball.rotation.set(0, 0, 0); ball.scale.setScalar(1); ball.visible = true; ctx.floorReset();
     K.p.position.set(0, 0, GZ + 0.3); K.p.rotation.set(0, 0, 0); K.hips.position.y = K.leg;
+    const si = ORDER[Math.min(shots, 4)]; sty = STY[si]; tags.forEach((l, i) => (l.visible = i === si));
+    guess = si === 1 ? pick([-1, 1]) : 0; // el adivinador elige su lado antes de tu tiro
+    let h2 = Math.floor(Math.random() * 4); if (h2 === hot) h2 = (h2 + 1 + Math.floor(Math.random() * 3)) % 4; hot = h2;
+    hotM.position.set(CORN[hot].x, CORN[hot].y, GZ + 0.05); hotM.visible = true;
+    if (running) { ctx.pop('PORTERO ' + sty.word, 'small'); ctx.toast(sty.tip, 3200); }
     camera.position.set(0, 1.6, 2.8); ctx.lookReset(0, -0.05); info();
   }
   function shoot(vel2) {
@@ -509,15 +655,18 @@ function penalty(ctx, opt) {
     // trayectoria desde donde está el balón (punto penal o sobre tu piso real) hasta el punto elegido del arco
     const P0 = ball.position, tx = clamp(lat * 1.8, -1.4, 1.4) * 3.66, ty = clamp(0.25 + (pw - 0.75) * 2.8, 0.12, 3.4), T = 0.62 / clamp(pw, 0.7, 1.4) * (GZ - P0.z) / GZ;
     vel.set((tx - P0.x) / T, (ty - P0.y) / T + 0.5 * 9.8 * T, (GZ - P0.z) / T);
-    const r = Math.random(); dive = r < 0.4 ? -1 : r < 0.8 ? 1 : 0; diveT = 0.001; // el portero adivina un lado
-    saveX = dive * 2.3;
+    // el portero se lanza según su estilo: el adivinador al lado que ya eligió; los otros adivinan tu lado con probabilidad «read»
+    const side = Math.abs(tx) > 0.9 ? Math.sign(tx) : 0;
+    if (sty.read < 0) dive = guess;
+    else dive = Math.random() < sty.read ? side : pick([-1, 0, 1].filter(v => v !== side));
+    diveT = 0.001; saveX = dive * 2.3; tags.forEach(l => (l.visible = false)); // el letrero se esconde mientras se lanza
   }
   const intro = withIntro(ctx, opt, [{ t: 0, p: [10, 9, 14], yaw: 0.6, pitch: -0.32 }, { t: 3.8, p: [0, 1.6, 2.8], yaw: 0, pitch: -0.05 }], 0, -0.05, () => setup());
   let slowed = false;
   const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea! (un poco a un lado para apuntar)' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba; inclínalo a un lado para apuntar' : '👆 Desliza hacia el arco: la inclinación apunta y la velocidad es la fuerza');
   setup();
   return {
-    camLock: !opt.quick, foot: true, refreshHint: startHint,
+    camLock: !opt.quick, foot: true, refreshHint: startHint, _dbg: { hot: () => CORN[hot], sty: () => sty.word },
     start() { running = true; this.camLock = false; setup(); startHint(); },
     canKick: () => running && st === 'rest' && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
@@ -529,11 +678,11 @@ function penalty(ctx, opt) {
       ST.cheer(t, cel > 0 ? 0.3 : 0.02); cel = Math.max(0, cel - dt);
       // portero: se mueve de lado a lado y luego se lanza
       if (diveT) {
-        diveT += dt; const k = smooth(diveT / 0.45);
-        K.p.position.x = lerp(kx, saveX, k); K.p.rotation.z = -dive * 1.25 * k; K.p.position.y = dive ? Math.sin(Math.min(1, diveT / 0.45) * Math.PI) * 0.5 : Math.sin(Math.min(1, diveT / 0.5) * Math.PI) * 0.45;
+        diveT += dt; const u = clamp((diveT - sty.delay) / sty.dur, 0, 1), k = smooth(u);
+        K.p.position.x = lerp(kx, saveX, k); K.p.rotation.z = lerp(-guess * 0.14, -dive * 1.25, k); K.p.position.y = Math.sin(u * Math.PI) * (dive ? 0.5 : 0.45);
         K.arms.forEach(a => { a.sh.rotation.x = -2.9; a.sh.rotation.z = 0; });
       } else if (st === 'rest') {
-        kx = Math.sin(t * 1.6) * 0.8; K.p.position.x = kx; K.legs.forEach(l => { l.th.rotation.x = -0.4; l.kn.rotation.x = 0.7; }); K.hips.position.y = K.leg - 0.12;
+        kx = guess * 0.5 + Math.sin(t * sty.sway) * (guess ? 0.3 : 0.8); K.p.position.x = kx; K.p.rotation.z = -guess * 0.14; // el adivinador se inclina hacia su lado K.legs.forEach(l => { l.th.rotation.x = -0.4; l.kn.rotation.x = 0.7; }); K.hips.position.y = K.leg - 0.12;
         K.arms.forEach(a => { a.sh.rotation.z = a.s * 0.7; a.sh.rotation.x = -0.3; a.el.rotation.x = -0.4; });
       }
       if (st === 'rest' && ctx.footOn() && running) { ctx.floorPlace(ball); ball.rotation.set(0, t * 0.6, 0); } // el balón queda anclado a tu piso real
@@ -544,22 +693,30 @@ function penalty(ctx, opt) {
         if (pz > GZ && ball.position.z <= GZ && !res) {
           const { x, y } = ball.position, inGoal = Math.abs(x) < GI.half - GI.postR && y < GI.bar - 0.04 && y > 0;
           const handX = K.p.position.x - Math.sin(K.p.rotation.z) * 1.0, handY = 1.0 + K.p.position.y + Math.cos(K.p.rotation.z) * 0.9;
-          const saved = inGoal && (dive ? Math.abs(x - handX) < 1.15 && y < 2.3 : Math.abs(x) < 0.85 && y < 2.4);
+          const angulo = Math.abs(x) > 2.3 && y > 1.7; // esquinas de arriba: ningún portero que se lanza llega
+          const saved = inGoal && (dive ? !angulo && Math.abs(x - handX) < sty.reach && y < 2.3 : Math.abs(x) < 0.85 && y < 2.4);
+          const dbl = inGoal && Math.abs(x - CORN[hot].x) < CW && Math.abs(y - CORN[hot].y) < CH; // ¿entró por la esquina dorada?
           const corner = Math.abs(x) > 2.4 || y > 1.7; // esquinas y parte alta: más difícil de atajar
           if (!inGoal) { res = 'out'; const palo = Math.abs(Math.abs(x) - 3.66) < 0.25 || Math.abs(y - 2.44) < 0.2; ctx.sfx(palo ? 'rim' : 'lose'); ctx.pop(palo ? '¡AL PALO!' : '¡AFUERA!', 'bad'); if (palo) ctx.shake(0.3); vel.set(vel.x * 0.3, 2, 3); }
           else if (saved) { res = 'save'; ctx.sfx('block'); ctx.pop('¡ATAJADA!', 'bad'); ctx.shake(0.25); vel.set(-vel.x * 0.3, 3, 6); }
-          else { res = 'goal'; goals++; cel = 2.5; netK = 1; ctx.sfx('crowd'); ctx.sfx('score'); ctx.shake(0.45); ctx.burst(_v.set(x, y, GZ - 1), [0xf7b5cd, 0xffffff, 0x111111], 80, 3); ctx.pop(corner ? '¡GOLAZO AL ÁNGULO!' : '¡GOOOL!', corner ? 'fire' : 'good'); vel.multiplyScalar(0.15); }
+          else {
+            res = 'goal'; goals++; pts += dbl ? 200 : 100; cel = 2.5; netK = 1; ctx.sfx('crowd'); ctx.sfx(dbl ? 'perfect' : 'score'); ctx.shake(dbl ? 0.6 : 0.45);
+            ctx.burst(_v.set(x, y, GZ - 1), dbl ? [0xffd23a, 0xffffff, 0xff8a00] : [0xf7b5cd, 0xffffff, 0x111111], dbl ? 140 : 80, dbl ? 4 : 3);
+            ctx.pop(dbl ? '¡x2 ESQUINA DORADA!' : corner ? '¡GOLAZO AL ÁNGULO!' : '¡GOOOL!', dbl || corner ? 'fire' : 'good'); vel.multiplyScalar(0.15);
+          }
+          hotM.visible = dbl; // si fue gol dorado, el marco se queda brillando un momento
           info();
           setTimeout(() => {
             if (!running) return;
-            if (goals >= 3) { running = false; const medal = shots <= 3 ? 'oro' : shots <= 4 ? 'plata' : 'bronce'; ctx.win('penalty', { medal, line: `⚽ ${goals} goles en ${shots} penales` }); return; }
-            if (shots >= 5) { running = false; ctx.lose(`Hiciste ${goals} de 5 goles. Necesitas 3. Apunta a las esquinas: el portero no siempre adivina.`); return; }
+            if (goals >= 3) { running = false; const medal = pts >= 500 ? 'oro' : pts >= 400 || shots <= 3 ? 'plata' : 'bronce', b = ctx.best('penalty', pts); ctx.win('penalty', { medal, line: `⚽ ${goals} goles en ${shots} penales · ${pts} pts`, record: b.isNew ? '¡NUEVO RÉCORD!' : `RÉCORD: ${b.best} pts` }); return; }
+            if (shots >= 5) { running = false; ctx.lose(`Hiciste ${goals} de 5 goles. Necesitas 3. Fíjate en el portero: el lento reacciona tarde, el adivinador se inclina hacia su lado y al felino lo superas tirando al ángulo (esquinas de arriba).`); return; }
             setup();
           }, 2200);
         }
         if (res === 'goal' && ball.position.z < netBack(ball.position.y)) { ball.position.z = netBack(ball.position.y); vel.z = 0; vel.x *= 0.3; }
         if (ball.position.y < 0.11) { ball.position.y = 0.11; vel.y = Math.abs(vel.y) * 0.4; vel.x *= 0.8; vel.z *= 0.8; }
       }
+      if (hotM.visible) hotM.material.opacity = 0.65 + Math.sin(t * 7) * 0.35; // la esquina dorada palpita
       if (netK > 0) { netK = Math.max(0, netK - dt * 1.5); goal.scale.z = 1 + Math.abs(Math.sin(t * 14)) * 0.14 * netK; } // la red se infla al hacer gol
       else goal.scale.z = 1;
     },
@@ -569,10 +726,8 @@ function penalty(ctx, opt) {
 
 
 /* ================= MIAMI BEACH — TOUR ACUÁTICO (3 carriles, fácil de jugar) ================= */
-// Lancha y moto acuática: tus modelos FBX (proa hacia +X). y = altura para que floten (el agua está en -0.35)
-function boatModel() { const b = new THREE.Group(); b.add(modelo('lancha', { fallback: boatOld, onLoad: o => (o.position.y = -0.6) })); return b; }
-function jetModel() { const j = new THREE.Group(); j.add(modelo('moto', { fallback: jetOld, onLoad: o => (o.position.y = -0.32) })); return j; }
-function boatOld() { // lancha hecha por código (respaldo mientras carga el modelo)
+// Tour acuático tal como estaba antes de la actualización (pedido de Cielo): lancha y moto hechas por código.
+function boatModel() {
   const b = new THREE.Group();
   const hs = new THREE.Shape(); hs.moveTo(-3, -1.2); hs.lineTo(1.6, -1.2); hs.quadraticCurveTo(3, -1, 3.8, 0); hs.quadraticCurveTo(3, 1, 1.6, 1.2); hs.lineTo(-3, 1.2); hs.lineTo(-3, -1.2);
   const hg = new THREE.ExtrudeGeometry(hs, { depth: 0.9, bevelEnabled: true, bevelSize: 0.12, bevelThickness: 0.12, bevelSegments: 2 }); hg.rotateX(-Math.PI / 2);
@@ -586,7 +741,7 @@ function boatOld() { // lancha hecha por código (respaldo mientras carga el mod
   const c = person({ top: 0xffffff, bottom: 0x1d2f6b, sleeves: true }); c.p.position.set(-2.6, 0.72, -0.5); c.p.rotation.y = Math.PI / 2; b.add(c.p);
   return b;
 }
-function jetOld() { // moto acuática hecha por código (respaldo)
+function jetModel() {
   const j = new THREE.Group();
   const js = new THREE.Shape(); js.moveTo(-1.5, -0.55); js.lineTo(0.8, -0.55); js.quadraticCurveTo(1.6, -0.4, 1.9, 0); js.quadraticCurveTo(1.6, 0.4, 0.8, 0.55); js.lineTo(-1.5, 0.55); js.lineTo(-1.5, -0.55);
   const jg = new THREE.ExtrudeGeometry(js, { depth: 0.55, bevelEnabled: true, bevelSize: 0.1, bevelThickness: 0.1, bevelSegments: 2 }); jg.rotateX(-Math.PI / 2);
@@ -662,9 +817,7 @@ function waterTour(ctx, opt) {
   gate(END, '🏁 META · MARINA DE MIAMI BEACH', 0x1d6fd8);
   for (let k = 0; k < 4; k++) { const b = boatModel(); b.scale.setScalar(0.8); b.position.set(END + 12 + k * 7, -0.3, -12 + (k % 2) * 3); b.rotation.y = 0.3; g.add(b); }
   // vehículo del jugador
-  // eye = altura de los ojos; cam = dónde vas parado/sentado (en la lancha, detrás del parabrisas; en la moto, en el asiento)
-  const BI = modelInfo('lancha'), JI = modelInfo('moto');
-  const VEH = { boat: { g: boatModel(), eye: BI ? 1.6 : 2.35, cam: BI ? BI.consoleX[0] - 2 : 0.6 }, jet: { g: jetModel(), eye: JI ? 1.3 : 1.75, cam: JI ? JI.seatX - 0.9 : -0.45 } };
+  const VEH = { boat: { g: boatModel(), eye: 2.35, cam: 0.6 }, jet: { g: jetModel(), eye: 1.75, cam: -0.45 } };
   VEH.boat.g.visible = VEH.jet.g.visible = false; g.add(VEH.boat.g, VEH.jet.g);
   let veh = null, running = false, alive = true, x = 0, lane = 1, z = LANES[1], hearts = 3, stars = 0, photos = new Set(), inv = 0, stopI = 0, phase = 'drive', infoT = 0, eng = null, waveT = 0;
   const FACT = { '🐢': 'Tortuga marina: Florida tiene la mayor cantidad de nidos de tortugas marinas de EE. UU.', '🐬': 'Delfín nariz de botella: es el mamífero oficial de agua salada de Florida.', '🦭': 'Manatí: es el mamífero marino oficial de Florida. Nada despacio cerca de la orilla.', '🦜': 'Loro: en Miami viven loros en libertad.' };
@@ -703,7 +856,7 @@ function waterTour(ctx, opt) {
   const pickA = p => { const h = p.ray.intersectObjects(animals.filter(a => a.parent && a.parent.visible), true).find(o => o.object.material === hitM); return h ? h.object.parent : null; };
   const seat = new V3(), seatPos = () => { const V = VEH[veh || 'boat']; return seat.set(x + V.cam, V.eye + Math.sin(performance.now() / 600) * 0.06, z); };
   const refreshHint = () => ctx.hint(running ? (ctx.isHand() ? '☝️ Mueve el índice a la izquierda, al centro o a la derecha para cambiar de carril' : '◀ ▶ o desliza para cambiar de carril') + ' · recoge ⭐ · esquiva las boyas · toca animales para fotos 📸' : '');
-  const intro = withIntro(ctx, opt, [{ t: 0, p: [-40, 26, -60], yaw: -2.4, pitch: -0.35 }, { t: 3.5, p: [-8, 6, -26], yaw: -1.9, pitch: -0.15 }, { t: 5, p: [VEH.boat.cam, VEH.boat.eye, LANES[1]], yaw: -Math.PI / 2 - 0.25, pitch: -0.05 }], -Math.PI / 2 - 0.25, -0.05);
+  const intro = withIntro(ctx, opt, [{ t: 0, p: [-40, 26, -60], yaw: -2.4, pitch: -0.35 }, { t: 3.5, p: [-8, 6, -26], yaw: -1.9, pitch: -0.15 }, { t: 5, p: [0.6, 2.35, LANES[1]], yaw: -Math.PI / 2 - 0.25, pitch: -0.05 }], -Math.PI / 2 - 0.25, -0.05);
   let sx = 0, sy = 0;
   return {
     camLock: !opt.quick, dwellTime: 0.45, refreshHint,
@@ -761,9 +914,9 @@ export const GAMES2 = {
     fact: 'Florida es conocida como “The Sunshine State” (el Estado del Sol), y Miami Beach es una de sus playas más famosas del mundo.'
   },
   heroes: {
-    short: 'Isla de Héroes', title: '🦸 Orlando — Isla de Héroes', pix: 'ISLA DE HÉROES', tag: 'ORLANDO · INVASIÓN DE DRONES', winMsg: '¡Salvaste la Isla de Héroes!', create: heroes,
+    short: 'Isla de Héroes', title: '🦸 Orlando — Isla de Héroes', pix: 'ISLA DE HÉROES', tag: 'ORLANDO · OLEADAS Y JEFE FINAL', winMsg: '¡Salvaste la Isla de Héroes!', create: heroes,
     icon() { const i = new THREE.Group(); const m = weaponModel(2); m.scale.setScalar(0.42); i.add(m); return i; },
-    how: h => '🚨 ¡Unos drones invaden el parque de superhéroes!<br>1️⃣ <b>Elige tu arma</b> con los botones de abajo.<br>2️⃣ Los drones aparecen <b>de uno en uno frente a ti</b>, marcados con un <b>aro rojo</b>.<br>3️⃣ Pulsa el botón grande de ataque ' + (h ? '(o haz pinza)' : '(o toca la pantalla)') + '. Cada dron aguanta 2 golpes.<br><b>Derriba 5 drones.</b>',
+    how: h => '🚨 ¡Unos drones invaden el parque de superhéroes!<ol class="steps"><li><b>Elige tu arma</b> con los botones de abajo.</li><li>Llegan en <b>3 oleadas</b> (1, 2 y 2 drones) y al final el <b>👾 JEFE</b>. Ataca con el botón grande ' + (h ? '(o haz pinza)' : '(o toca el dron)') + '; el <b>aro rojo</b> marca a cuál le das.</li><li>Cuando un dron <b>brille en rojo</b> te va a disparar: cuando venga la bola, mantén <b>🛡️ CUBRIRSE</b>' + (h ? ' (o muestra la palma ✋)' : '') + '. Tienes 3 ❤️.</li></ol><b>Derriba los 5 drones y al jefe.</b>',
     fact: 'Islands of Adventure, en Universal Orlando, abrió en 1999 y una de sus zonas está dedicada a los superhéroes de cómic.'
   },
   city: {
@@ -775,13 +928,13 @@ export const GAMES2 = {
   fg: {
     short: 'Fútbol americano', title: '🏈 Field Goal Challenge', pix: 'GOL DE CAMPO', tag: 'FÚTBOL AMERICANO · 3 GOLES', countdown: true, winMsg: '¡Eres el pateador estrella!', create: fg, foot: true,
     icon() { const i = new THREE.Group(); const b = fbBall(); b.scale.setScalar(1); i.add(b); return i; },
-    how: h => 'Eres el pateador. Patea el balón para que pase <b>entre los postes amarillos y por encima del travesaño</b>. Cada gol te aleja más (20, 30 y 40 yardas). <b>Consigue 3 goles de campo.</b> Puedes patear con tu pie real frente a la cámara (te verás en un recuadro) ' + (h ? 'o mover tu <b>índice rápido hacia arriba</b>.' : 'o deslizar el dedo.'),
+    how: h => 'Eres el pateador. Patea el balón para que pase <b>entre los postes amarillos y por encima del travesaño</b>. <b>¡Ojo!</b> En cada ronda unos jugadores <b>empujan los postes</b> a la izquierda o a la derecha: espera a que paren y patea hacia su lado. Cada gol te aleja más (20, 30 y 40 yardas). <b>Consigue 3 goles de campo.</b> Patea con tu pie (el celular apuntando a tus zapatos) ' + (h ? 'o mueve tu <b>índice rápido hacia arriba</b>.' : 'o desliza el dedo.'),
     fact: 'Florida tiene tres equipos de la NFL: los Miami Dolphins, los Tampa Bay Buccaneers y los Jacksonville Jaguars.'
   },
   penalty: {
     short: 'Penales', title: '⚽ Penalty Challenge', pix: 'PENALES', tag: 'FÚTBOL · 5 TIROS', countdown: true, winMsg: '¡Ganaste la tanda de penales!', create: penalty, foot: true,
     icon() { const i = new THREE.Group(); i.add(modelo('balon-futbol', { fallback: () => new THREE.Mesh(sph(0.11, 24), soccerBallMat()), onLoad: o => o.scale.setScalar(0.11) })); return i; },
-    how: h => 'Tienes <b>5 penales</b>. Apunta a las esquinas: el portero se lanza hacia un lado. <b>Marca al menos 3 goles.</b> Puedes patear con tu pie real frente a la cámara (te verás en un recuadro) ' + (h ? 'o mover tu <b>índice rápido hacia arriba</b> (inclinado a un lado para apuntar).' : 'o deslizar el dedo (la inclinación apunta, la velocidad es la fuerza).'),
+    how: h => 'Tienes <b>5 penales</b> y el portero cambia: <b>🐢 lento</b>, <b>🎲 adivinador</b> (se inclina hacia el lado que eligió) y <b>🐆 felino</b>. Una esquina del arco brilla: <b>el gol ahí vale doble (x2)</b>. <b>Marca al menos 3 goles.</b> Patea con tu pie (el celular apuntando a tus zapatos) ' + (h ?'o mueve tu <b>índice rápido hacia arriba</b> (inclinado a un lado para apuntar).' : 'o desliza el dedo (la inclinación apunta, la velocidad es la fuerza).'),
     fact: 'El Inter Miami CF juega en la MLS desde 2020.'
   }
 };

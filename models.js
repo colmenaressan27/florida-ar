@@ -327,7 +327,8 @@ function applyTextures(file, t) {
     new THREE.TextureLoader().load(DIR + 'texturas/' + img, tx => { tx.colorSpace = THREE.SRGBColorSpace; tx.userData.keep = true; m.map = tx; m.color.set(0xffffff); m.vertexColors = false; m.needsUpdate = true; });
   }
 }
-export function preloadModels() { return Promise.all(Object.keys(DEF).map(loadFile)); }
+const SIN_USO = ['lancha', 'moto']; // el tour acuático volvió a sus vehículos hechos por código; quita un nombre de aquí para volver a usar ese FBX
+export function preloadModels() { return Promise.all(Object.keys(DEF).filter(f => !SIN_USO.includes(f)).map(loadFile)); }
 export const modelInfo = key => (ready[key] ? ready[key].userData.info : null);
 export const modelMat = (key, name) => (ready[key] ? ready[key].mats[name] : null);
 function free(o) { o.traverse(n => { if (n.geometry && !n.geometry.userData.keep) n.geometry.dispose(); }); }
