@@ -516,7 +516,7 @@ function fg(ctx, opt) {
     ball.position.set(0, 0.26, z);
     tee.position.z = z; ball.rotation.set(0.35, 0, 0);
     team.forEach((P, i) => { const k = i % 7, def = i >= 7; P.p.position.set((k - 3) * 1.1, 0, z - (def ? 7.5 : 6.3)); P.legs.forEach(l => { l.th.rotation.x = -0.6; l.kn.rotation.x = 0.9; }); P.hips.position.y = P.leg * 0.85; P.arms.forEach(a => { a.sh.rotation.x = def ? -1.6 : -0.4; }); });
-    camera.position.set(0, 1.6, z + 4.2); ctx.lookReset(0, 0.04);
+    camera.position.set(0, 1.6, z + 4.2); ctx.lookReset(0, 0.04); ctx.teleport(0, z + 4.2); // 🥽 en el visor te lleva a la nueva distancia
     if (running) movePosts();
     ctx.info(`🏈 Goles ${good}/3 · ${Math.round(DIST[stage] / YD)} yardas · Intentos ${tries}`);
   }
@@ -530,11 +530,11 @@ function fg(ctx, opt) {
   }
   let slowed = false;
   const intro = withIntro(ctx, opt, [{ t: 0, p: [18, 14, 30], yaw: 0.6, pitch: -0.3 }, { t: 4, p: [0, 1.6, spotZ() + 4.2], yaw: 0, pitch: 0.04 }], 0, 0.04, () => setup());
-  const startHint = () => ctx.hint(mv.on ? '⏳ ¡Están moviendo los postes! Espera a que paren…' : (ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea hacia los postes!' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, inclinado hacia los postes' : '👆 Desliza rápido hacia los postes (inclina el dedo hacia su lado)'));
+  const startHint = () => ctx.hint(mv.on ? '⏳ ¡Están moviendo los postes! Espera a que paren…' : (ctx.inXR() ? '✋ Golpea el balón con la palma hacia los postes · más fuerte llega más lejos' : ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea hacia los postes!' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba, inclinado hacia los postes' : '👆 Desliza rápido hacia los postes (inclina el dedo hacia su lado)'));
   const PI0 = modelInfo('postes') || POSTS0; // ancho real de tus postes (centro de cada parante)
   setup();
   return {
-    camLock: !opt.quick, foot: true, refreshHint: startHint, _dbg: { postX: () => post.position.x, moving: () => mv.on, dist: () => ball.position.z - PZ },
+    camLock: !opt.quick, foot: true, refreshHint: startHint, xrWorld: { type: 'portal', keep: [ball] }, _dbg: { good: () => good, tries: () => tries, postX: () => post.position.x, moving: () => mv.on, dist: () => ball.position.z - PZ },
     start() { running = true; this.camLock = false; setup(); startHint(); },
     canKick: () => running && st === 'rest' && !mv.on && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },
@@ -647,7 +647,7 @@ function penalty(ctx, opt) {
     let h2 = Math.floor(Math.random() * 4); if (h2 === hot) h2 = (h2 + 1 + Math.floor(Math.random() * 3)) % 4; hot = h2;
     hotM.position.set(CORN[hot].x, CORN[hot].y, GZ + 0.05); hotM.visible = true;
     if (running) { ctx.pop('PORTERO ' + sty.word, 'small'); ctx.toast(sty.tip, 3200); }
-    camera.position.set(0, 1.6, 2.8); ctx.lookReset(0, -0.05); info();
+    camera.position.set(0, 1.6, 2.8); ctx.lookReset(0, -0.05); ctx.teleport(0, 2.8); info();
   }
   function shoot(vel2) {
     if (!running || st !== 'rest') return;
@@ -663,10 +663,10 @@ function penalty(ctx, opt) {
   }
   const intro = withIntro(ctx, opt, [{ t: 0, p: [10, 9, 14], yaw: 0.6, pitch: -0.32 }, { t: 3.8, p: [0, 1.6, 2.8], yaw: 0, pitch: -0.05 }], 0, -0.05, () => setup());
   let slowed = false;
-  const startHint = () => ctx.hint(ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea! (un poco a un lado para apuntar)' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba; inclínalo a un lado para apuntar' : '👆 Desliza hacia el arco: la inclinación apunta y la velocidad es la fuerza');
+  const startHint = () => ctx.hint(ctx.inXR() ? '✋ Golpea el balón con la palma hacia el arco · hacia arriba va alto · hacia un lado apuntas a esa esquina' : ctx.footOn() ? '🦶 Pon el pie detrás del balón de tu piso y ¡patea! (un poco a un lado para apuntar)' : ctx.isHand() ? '☝️ Mueve el índice rápido hacia arriba; inclínalo a un lado para apuntar' : '👆 Desliza hacia el arco: la inclinación apunta y la velocidad es la fuerza');
   setup();
   return {
-    camLock: !opt.quick, foot: true, refreshHint: startHint, _dbg: { hot: () => CORN[hot], sty: () => sty.word },
+    camLock: !opt.quick, foot: true, refreshHint: startHint, xrWorld: { type: 'portal', keep: [ball] }, _dbg: { goals: () => goals, shots: () => shots, hot: () => CORN[hot], sty: () => sty.word },
     start() { running = true; this.camLock = false; setup(); startHint(); },
     canKick: () => running && st === 'rest' && (!ctx.footOn() || ball.visible),
     onDown() { if (intro.on) { intro.finish(); this.camLock = false; } },

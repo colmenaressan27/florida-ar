@@ -14,12 +14,18 @@ import * as THREE from 'three';
 // FOVEA: 0 a 1, cuánto se simplifican los bordes de la vista (más = más fluido) · FPS: cuadros por segundo pedidos al visor
 // SHADOWS: sombras dentro del visor (se ven mejor pero cuestan rendimiento)
 export const QUEST = { MENU_D: 1.0, MENU_DROP: 0.2, POKE: 0.008, POKE_OUT: 0.025, NEAR: 0.15, FOLLOW: 55, SCALE: 1, FOVEA: 1, FPS: 72, SHADOWS: false };
+// Patada con la mano (Penales y Fútbol americano). MIN: velocidad mínima de la mano para que cuente (m/s)
+// REACH: qué tan cerca del balón cuenta el golpe (m) · POWER: fuerza por cada m/s de la mano · LIFT: cuánto sube el tiro si golpeas hacia arriba
+// AIM: cuánto se desvía si golpeas hacia un lado · TEE_D / TEE_DROP: el balón flota a TEE_D m al frente y TEE_DROP m más abajo de tus ojos
+export const HANDKICK = { MIN: 1.2, REACH: 0.08, POWER: 0.1, LIFT: 0.6, AIM: 1.2, TEE_D: 0.45, TEE_DROP: 0.7 };
+// Ventana al estadio en realidad mixta: ancho y alto (m) y a qué distancia de ti
+export const WINDOW = { W: 3.2, H: 2.5, D: 1.8 };
 
-// Juegos que ya se pueden elegir en el visor (los demás dicen «Próximamente en Quest») y cómo se jugarán con las manos
+// Juegos que ya se pueden elegir en el visor (los demás dicen «Próximamente en Quest») y cómo se juegan con las manos
 const SPORTS = {
-  heat: { c: '#ff8a00', how: 'Agarra el balón con la mano, dribla contra tu piso y lánzalo al aro con el brazo.' },
-  fg: { c: '#3ddc84', how: 'Golpea el balón con la mano para meterlo entre los postes. Los jugadores los cambian de lado en cada ronda.' },
-  penalty: { c: '#24d1ff', how: 'El estadio se abre como una ventana frente a ti. Golpea el balón con la mano: la esquina dorada vale doble.' }
+  heat: { c: '#ff8a00', full: 'Cancha completa', how: 'Acércate al balón y junta los dedos (pinza) para agarrarlo. Lánzalo hacia el aro con el brazo y suelta los dedos. Para driblar, suéltalo hacia tu piso y vuelve a agarrarlo. Mete 5 canastas.' },
+  fg: { c: '#3ddc84', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia los postes: más fuerte llega más lejos y hacia un lado apuntas a ese lado. Ojo: los jugadores cambian los postes de lado.' },
+  penalty: { c: '#24d1ff', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia el arco: si golpeas hacia arriba va alto y hacia un lado apuntas a esa esquina. La esquina dorada vale doble.' }
 };
 
 /* ================= Estilo «arcade tropical» (los mismos colores de CSS/style.css) ================= */
@@ -78,7 +84,7 @@ export function initXR(api) {
   const hud = new THREE.Group(); ui.add(hud);                       // avisos que te siguen la mirada con suavidad
   const surfs = new Set();                                          // superficies que tocas o apuntas (paneles y botones)
   let session = null, xmode = '', frames = 0, cardG = null, toastS = null, toastT = 0, state = '';
-  const slots = { info: null, hint: null }, pops = [];
+  const slots = { info: null, hint: null }, pops = [], popLog = [];
   const isQuestUA = /OculusBrowser|Quest/i.test(navigator.userAgent);
 
   // ---------- superficies dibujadas con canvas ----------
@@ -181,14 +187,10 @@ export function initXR(api) {
       g.fillStyle = C.sun; g.font = `11px ${PXF}`; g.textAlign = 'center'; g.fillText('PRONTO', 142, 77);
     };
   }
-  function showMenu() {
-    state = 'menu'; buildMenu(); menu.visible = !cardG;
-    if (!menuPlaced) { menu.visible = false; menuMem.wait = true; }
+  function showMenu() { // el menú aparece frente a ti (al entrar al visor y al volver de un juego)
+    gameEnd(); state = 'menu'; buildMenu(); menuPlaced = false; menu.visible = false; menuMem.wait = true; menuMem.at = frames + 2;
   }
-  function openSport(k) { // primera entrega: el menú ya elige los deportes; el juego con las manos llega en la siguiente
-    const G = GAMES[k];
-    card(G.title, `<p>${SPORTS[k].how}</p><p>🛠️ Este juego llega al Quest en la siguiente entrega.</p>`, [{ label: 'Volver al menú', primary: true }], 'how');
-  }
+  function openSport(k) { api.enter(k); }
 
   // ---------- tarjeta 3D (lo mismo que las ventanas del celular) ----------
   function card(title, html, btns, kind = '') {
@@ -213,10 +215,10 @@ export function initXR(api) {
     ui.add(g);
     if (state === 'menu' && menuPlaced) { g.position.copy(menu.position); g.quaternion.copy(menu.quaternion); g.translateZ(0.04); }
     else putInFront(g, QUEST.MENU_D, -QUEST.MENU_DROP);
-    g.scale.setScalar(0.88); menu.visible = false;
+    g.scale.setScalar(0.88); menu.visible = false; hud.visible = false; // con la tarjeta abierta, los textos del juego no la tapan
   }
   function closeCard() {
-    if (!cardG) return; dropGroup(cardG); cardG = null;
+    if (!cardG) return; dropGroup(cardG); cardG = null; hud.visible = true;
     if (state === 'menu' && menuPlaced) { menu.visible = true; for (const m of menu.children) m.userData.surf && m.userData.surf.paint(); }
   }
 
@@ -246,6 +248,7 @@ export function initXR(api) {
   const POPC = { good: [C.sun, '#b8005a'], fire: ['#ffc04d', '#c21800'], bad: ['#fff', C.bad], small: [C.sun, '#b8005a'] };
   function pop(text, kind = 'good') {
     if (!session) return;
+    popLog.push(String(text)); if (popLog.length > 30) popLog.shift();
     const t = pxText(text), size = kind === 'bad' || kind === 'small' ? 34 : 52;
     mg.font = `${size}px ${PXF}`; const W = Math.ceil(mg.measureText(t).width + 40), H = size * 2;
     const [fg, sh] = POPC[kind] || POPC.good;
@@ -283,6 +286,8 @@ export function initXR(api) {
   const inputs = [0, 1].map(i => {
     const inp = {
       i, ctl: renderer.xr.getController(i), hand: renderer.xr.getHand(i), src: null, hover: null, pressBtn: null, armed: null, near: null, tip: new THREE.Vector3(),
+      grabPos: new THREE.Vector3(), palmPos: new THREE.Vector3(), grabPrev: new THREE.Vector3(), palmPrev: new THREE.Vector3(), ok: false, // dónde agarras (entre pulgar e índice) y dónde está tu palma, en el mundo
+      pg: { p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0 }, pp: { p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0 }, // sus velocidades (m/s)
       ray: new THREE.Mesh(rayGeo, mat(0xffffff, { alphaMap: rayTex, transparent: true, depthWrite: false })),
       ring: new THREE.Mesh(ringGeo, mat(C.sun, { transparent: true, depthWrite: false })),
       dot: new THREE.Mesh(dotGeo, mat(C.sun)),
@@ -302,11 +307,29 @@ export function initXR(api) {
       const b = inp.pressBtn; inp.pressBtn = null;
       if (b) { if (b === inp.hover) press(b, inp); } else if (session) sceneInput('selectend', inp);
     });
+    inp.ctl.addEventListener('squeezestart', () => { if (session) sceneInput('squeezestart', inp); }); // botón de agarre del control
+    inp.ctl.addEventListener('squeezeend', () => { if (session) sceneInput('squeezeend', inp); });
     return inp;
   });
+  const _v1 = new THREE.Vector3();
+  function track(st, p, now) { // velocidad suavizada de un punto de la mano (sin crear objetos en cada cuadro)
+    if (st.t) { const dt = Math.max(now - st.t, 1e-3); _v1.copy(p).sub(st.p).divideScalar(dt); st.v.lerp(_v1, 1 - Math.exp(-dt / 0.035)); }
+    st.p.copy(p); st.t = now;
+  }
+  const joint = (inp, n) => { const j = inp.hand.joints && inp.hand.joints[n]; return j && j.visible ? j : null; };
+  function handPoints(inp) {
+    inp.palmPrev.copy(inp.palmPos); inp.grabPrev.copy(inp.grabPos); // dónde estaba la mano en el cuadro anterior (para el golpe)
+    if (inp.src.hand) {
+      const th = joint(inp, 'thumb-tip'), ix = joint(inp, 'index-finger-tip'), pm = joint(inp, 'middle-finger-metacarpal') || joint(inp, 'wrist');
+      inp.ok = !!pm; if (!pm) return;
+      pm.getWorldPosition(inp.palmPos);
+      if (th && ix) inp.grabPos.copy(th.getWorldPosition(_v1)).add(ix.getWorldPosition(_l)).multiplyScalar(0.5); else inp.grabPos.copy(inp.palmPos);
+    } else { inp.ctl.getWorldPosition(inp.palmPos); inp.grabPos.copy(inp.palmPos); inp.ok = true; }
+    const now = performance.now() / 1000; track(inp.pg, inp.grabPos, now); track(inp.pp, inp.palmPos, now);
+  }
   function sceneInput(type, inp) { const sc = api.current(); if (sc && sc.xrInput) sc.xrInput(type, inp); } // para los juegos (siguiente entrega)
   function press(b, inp) { b.flash = 0.14; api.sfx('click'); haptic(0.5, 30, inp); queueMicrotask(() => b.onPress()); }
-  const uiActive = () => !!cardG || (state === 'menu' && menu.visible);
+  const uiActive = () => !!cardG || (state === 'menu' && menu.visible) || (state === 'game' && bar.visible);
   const _l = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
   const rc = new THREE.Raycaster(); rc.far = 8;
   function nearest(tip, list) { // el panel o botón que tienes justo delante del dedo
@@ -321,7 +344,8 @@ export function initXR(api) {
   }
   function updateInput(inp, list, meshes) {
     inp.ray.visible = inp.ring.visible = inp.dot.visible = inp.joints.visible = false; inp.near = null;
-    if (!inp.src) { inp.hover = null; return; }
+    if (!inp.src) { inp.hover = null; inp.ok = false; return; }
+    handPoints(inp);
     const isHand = !!inp.src.hand, j = isHand && inp.hand.joints && inp.hand.joints['index-finger-tip'];
     if (isHand && xmode === 'immersive-vr') drawJoints(inp); // en VR no ves tus manos reales: se dibujan con puntos
     if (j && j.visible) {
@@ -343,6 +367,7 @@ export function initXR(api) {
     // de lejos: rayo desde la mano o el control; la pinza (o el gatillo) es el clic
     inp.ctl.getWorldPosition(_o); inp.ctl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
     rc.set(_o, _d); const h = rc.intersectObjects(meshes, false)[0];
+    if (!h && state === 'game' && !cardG) { inp.hover = null; return; } // jugando, el rayo solo aparece al apuntar a un botón
     inp.ray.position.copy(_o); inp.ray.quaternion.copy(_q); inp.ray.scale.set(1, 1, h ? h.distance : 0.5);
     inp.ray.material.opacity = h ? 0.9 : 0.35; inp.ray.visible = true;
     if (h) { inp.ring.position.copy(h.point); h.object.getWorldQuaternion(inp.ring.quaternion); inp.ring.translateZ(0.003); inp.ring.scale.setScalar(1); inp.ring.material.opacity = 1; inp.ring.visible = true; }
@@ -367,6 +392,128 @@ export function initXR(api) {
       b.liftV += ((goal - b.lift) * 320 - b.liftV * 30) * dt; b.lift += b.liftV * dt; b.mesh.position.z = b.z0 + b.lift;
       if (b.flash > 0) b.flash -= dt;
     }
+  }
+
+  // ---------- juegos dentro del visor ----------
+  // El grupo de la cámara (rig) se gira y se mueve para que el juego quede frente a ti: «al frente» del juego es hacia donde miras al entrar.
+  // Tu cuarto real no se mueve: al cambiar de posición en el juego, el estadio se mueve a tu alrededor (con un fundido corto).
+  const _e = new THREE.Euler(), _b = new THREE.Vector3(), _hv = new THREE.Vector3();
+  let spot = { x: 0, z: 0 }, eye = 1.6, world = null, kickBall = null, kickSeen = 0;
+  const poseP = new THREE.Vector3(0, 1.6, 0), poseQ = new THREE.Quaternion(); // tu cabeza según el visor (se guarda justo después de dibujar)
+  function afterRender() { poseP.copy(camera.position); poseQ.copy(camera.quaternion); }
+  function placeRig() { // pone tu cabeza (en x, z) justo sobre el punto del juego «spot»
+    _hv.copy(poseP).applyQuaternion(rig.quaternion);
+    rig.position.set(spot.x - _hv.x, 0, spot.z - _hv.z); rig.updateMatrixWorld(true);
+    for (const inp of inputs) { inp.pg.t = inp.pp.t = 0; inp.pg.v.set(0, 0, 0); inp.pp.v.set(0, 0, 0); } // el salto no cuenta como movimiento de la mano
+    placeGameUi();
+  }
+  function recenter() { // al entrar a un juego: hacia donde miras pasa a ser «al frente» del juego
+    closeCard(); state = 'game'; menu.visible = false;
+    rig.rotation.set(0, -_e.setFromQuaternion(poseQ, 'YXZ').y, 0); rig.updateMatrixWorld(true);
+    spot = { x: 0, z: 0 }; eye = THREE.MathUtils.clamp(poseP.y, 1.0, 2.0); placeRig();
+  }
+  function teleport(x, z) { // el juego te lleva a otro punto (otro penal, otra distancia, otra posición de tiro)
+    if (!session || state !== 'game' || Math.hypot(x - spot.x, z - spot.z) < 0.05) return;
+    spot = { x, z }; fadeM.material.opacity = 1; fadeGoal = 0; placeRig();
+  }
+  const gamePoint = (dx, y, dz, out = new THREE.Vector3()) => out.set(spot.x + dx, y, spot.z + dz); // punto del juego relativo a tu posición
+
+  // botonera a tu izquierda: volver al menú y cambiar entre «ventana» y estadio completo
+  const bar = new THREE.Group(); bar.visible = false; ui.add(bar);
+  let fullB = null;
+  function buildBar(key) {
+    for (const m of [...bar.children]) if (m.userData.surf) drop(m.userData.surf);
+    place(button(0.21, 0.07, drawBtn('🏠 Menú', 'ghost', 26), () => api.enter('hub')), bar, 0, 0.045);
+    fullB = world ? place(button(0.21, 0.07, (g, W, H, st) => drawBtn(world.full ? (world.type === 'portal' ? '🪟 Ventana' : '🏠 Mi cuarto') : '🌍 ' + (SPORTS[key] ? SPORTS[key].full : 'Completo'), 'ghost', 22)(g, W, H, st), () => { world.full = !world.full; applyWorld(); fullB.paint(); }), bar, 0, -0.045) : null;
+    bar.visible = true;
+  }
+  // ventana al estadio: un marco neón; dentro se ve el estadio y alrededor sigue tu cuarto (técnica «stencil»)
+  const portal = new THREE.Group(); portal.visible = false; ui.add(portal);
+  const mask = new THREE.Mesh(new THREE.PlaneGeometry(WINDOW.W, WINDOW.H), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp }));
+  mask.renderOrder = -100; portal.add(mask);
+  for (const [w, h, x, y, c] of [[WINDOW.W + 0.12, 0.06, 0, WINDOW.H / 2, C.pink], [0.06, WINDOW.H, -WINDOW.W / 2 - 0.03, 0, C.sun], [0.06, WINDOW.H, WINDOW.W / 2 + 0.03, 0, C.sun], [WINDOW.W + 0.12, 0.04, 0, -WINDOW.H / 2, C.pink]]) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.05), mat(c)); m.position.set(x, y, 0); portal.add(m);
+  }
+  // soporte del balón: un aro de luz bajo el balón que flota frente a ti
+  const tee = new THREE.Group(); tee.visible = false; ui.add(tee);
+  { const r = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.15, 40), mat(C.sun, { transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })); r.rotation.x = -Math.PI / 2; tee.add(r);
+    const d = new THREE.Mesh(new THREE.CircleGeometry(0.13, 40), mat(C.sea, { transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })); d.rotation.x = -Math.PI / 2; tee.add(d); }
+  function placeGameUi() {
+    gamePoint(0, WINDOW.H / 2, -WINDOW.D, portal.position); portal.rotation.set(0, 0, 0);
+    gamePoint(-0.5, eye - 0.72, -0.28, bar.position); bar.lookAt(spot.x, bar.position.y + 0.25, spot.z);
+  }
+  function floorPlace(o) { // el balón de la patada flota frente a tu cintura
+    gamePoint(0, eye - HANDKICK.TEE_DROP, -HANDKICK.TEE_D, _b); tee.position.set(_b.x, _b.y - 0.14, _b.z);
+    o.position.copy(o.parent ? o.parent.worldToLocal(_b) : _b);
+    o.visible = true; kickBall = o; kickSeen = 0.15;
+    return true;
+  }
+  function kicks(dt) { // ¿alguna mano golpeó el balón? fuerza según la velocidad; dirección según hacia dónde va la mano
+    kickSeen -= dt; tee.visible = kickSeen > 0;
+    const sc = api.current(); if (!kickBall || kickSeen <= 0 || !sc || !sc.kick || (sc.canKick && !sc.canKick())) return;
+    kickBall.getWorldPosition(_b);
+    for (const inp of inputs) {
+      if (!inp.src || !inp.ok) continue;
+      for (const [p, p0, v] of [[inp.palmPos, inp.palmPrev, inp.pp.v], [inp.grabPos, inp.grabPrev, inp.pg.v]]) {
+        const s = v.length(); if (s < HANDKICK.MIN) continue;
+        // barrido: el tramo que recorrió la mano desde el cuadro anterior (un golpe rápido puede atravesar el balón entre dos cuadros)
+        _seg.set(p0, p); _seg.closestPointToPoint(_b, true, _to);
+        if (_to.distanceTo(_b) > 0.12 + HANDKICK.REACH || v.dot(_to.copy(_b).sub(p0)) <= 0) continue;
+        const fwd = Math.max(-v.z, 0.3), up = v.y / fwd;
+        const pw = THREE.MathUtils.clamp(0.75 + HANDKICK.POWER * s + HANDKICK.LIFT * up, 0.8, 1.35), lat = THREE.MathUtils.clamp(v.x / fwd * HANDKICK.AIM, -1, 1);
+        haptic(1, 90, inp); kickBall = null; kickSeen = 0; tee.visible = false;
+        _dbgKick = { pw, lat, s };
+        sc.kick({ pw, lat }); return;
+      }
+    }
+  }
+  let _dbgKick = null; const _seg = new THREE.Line3();
+  // mundo del juego en realidad mixta: «portal» = el estadio solo dentro de la ventana · «room» = solo lo del juego en tu cuarto
+  function gameStart(sc) {
+    state = 'game'; menu.visible = false;
+    const w = sc && sc.xrWorld;
+    world = w && xmode === 'immersive-ar' ? { type: w.type, keep: new Set(w.keep), full: false, mats: new Map(), vis: new Map(), t: 0 } : null;
+    applyWorld(); buildBar(api.key()); placeGameUi();
+  }
+  function gameEnd() { // deja los materiales y objetos como estaban (algunos modelos se comparten entre juegos)
+    if (world) { world.full = true; applyWorld(); for (const [m, o] of world.mats) Object.assign(m, o); for (const [o, v] of world.vis) o.visible = v; }
+    world = null; kickBall = null; tee.visible = portal.visible = bar.visible = false;
+    for (const m of [...bar.children]) if (m.userData.surf) drop(m.userData.surf);
+  }
+  function stencil(m, on) {
+    if (!world.mats.has(m)) world.mats.set(m, { stencilWrite: m.stencilWrite, stencilRef: m.stencilRef, stencilFunc: m.stencilFunc, stencilZPass: m.stencilZPass });
+    m.stencilWrite = on; m.stencilRef = 1; m.stencilFunc = THREE.EqualStencilFunc; m.stencilZPass = THREE.KeepStencilOp;
+  }
+  const mats = o => (o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []);
+  function applyWorld() {
+    if (!world) return;
+    const root = api.root, on = !world.full;
+    portal.visible = world.type === 'portal' && on;
+    if (world.type === 'room') { // en tu cuarto solo queda lo del juego (y las luces)
+      for (const g of root.children) for (const o of g.children) {
+        if (o.isLight || world.keep.has(o)) continue;
+        if (!world.vis.has(o)) world.vis.set(o, o.visible);
+        o.visible = on ? false : world.vis.get(o);
+      }
+      return;
+    }
+    const walk = o => { if (world.keep.has(o)) return; for (const m of mats(o)) stencil(m, on); for (const c of o.children) walk(c); };
+    walk(root);
+    for (const k of world.keep) k.traverse(o => mats(o).forEach(m => stencil(m, on && behindWindow(k)))); // el balón: visible en tu cuarto, y dentro del estadio al cruzar la ventana
+  }
+  const behindWindow = o => o.getWorldPosition(_b).z < portal.position.z;
+  function worldTick(dt) {
+    if (!world) return;
+    world.t += dt;
+    if (world.t > 0.5) { world.t = 0; applyWorld(); } // los modelos que terminan de cargar también quedan dentro de la ventana
+    else if (world.type === 'portal' && !world.full) for (const k of world.keep) { const on = behindWindow(k); k.traverse(o => mats(o).forEach(m => stencil(m, on))); }
+  }
+  function ready(key, start) { // instrucciones del juego en el visor
+    const G = GAMES[key], s = SPORTS[key];
+    if (!session) return;
+    if (state !== 'game' || !bar.visible) return setTimeout(() => ready(key, start), 0); // espera a que el juego esté armado
+    card(G.title, `<p>${s ? s.how : ''}</p><p>🏠 A tu izquierda tienes el botón para volver al menú${world ? ` y 🌍 ${s.full.toLowerCase()}` : ''}.</p>`,
+      [{ label: '✋ ¡A JUGAR!', primary: true, fn: start }, { label: 'Volver al menú', fn: () => api.enter('hub') }], 'how');
   }
 
   // ---------- fondo simple si el visor solo tiene realidad virtual (sin cámaras de passthrough) ----------
@@ -420,7 +567,8 @@ export function initXR(api) {
   }
   function end() { if (session) session.end().catch(() => {}); }
   renderer.xr.addEventListener('sessionend', () => { // al quitarte el visor o tocar «Salir»: todo vuelve a la pantalla del celular
-    session = null; state = ''; renderer.xr.enabled = false;
+    session = null; renderer.xr.enabled = false;
+    gameEnd(); state = ''; rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.updateMatrixWorld(true); // la cámara del celular vuelve a su lugar
     closeCard(); drop(toastS); toastS = null; setSlot('info', ''); setSlot('hint', '');
     for (const p of pops.splice(0)) drop(p);
     for (const m of [...menu.children]) if (m.userData.surf) drop(m.userData.surf);
@@ -443,7 +591,7 @@ export function initXR(api) {
   function frame(dt) {
     if (!session) return;
     frames++;
-    if (menuMem.wait && frames > 3) { menuMem.wait = false; putInFront(menu, QUEST.MENU_D, -QUEST.MENU_DROP); menuPlaced = true; menu.visible = !cardG; }
+    if (menuMem.wait && frames > Math.max(3, menuMem.at || 0)) { menuMem.wait = false; putInFront(menu, QUEST.MENU_D, -QUEST.MENU_DROP); menuPlaced = true; menu.visible = !cardG; }
     if (state === 'menu' && menu.visible) follow(menu, menuMem, QUEST.MENU_D, dt);
     if (cardG) { // la tarjeta entra con un pequeño «pop» y también te sigue si te giras
       cardG.userData.t += dt; cardG.scale.setScalar(THREE.MathUtils.lerp(0.88, 1, 1 - Math.pow(1 - Math.min(1, cardG.userData.t / 0.22), 3)));
@@ -454,6 +602,7 @@ export function initXR(api) {
     for (const s of surfs) if (shown(s.mesh)) { s.mesh.updateWorldMatrix(true, false); list.push(s); meshes.push(s.mesh); }
     for (const inp of inputs) updateInput(inp, list, meshes);
     syncButtons(dt);
+    if (state === 'game') { kicks(dt); worldTick(dt); }
     if (toastS && (toastT -= dt) <= 0) { drop(toastS); toastS = null; }
     for (let i = pops.length - 1; i >= 0; i--) {
       const p = pops[i]; p.life += dt;
@@ -469,14 +618,20 @@ export function initXR(api) {
   const _dbg = {
     state: () => ({ on: !!session, mode: xmode, menu: menu.visible, card: !!cardG, toast: !!toastS, inputs: inputs.map(i => ({ src: !!i.src, side: i.src && i.src.handedness, hand: !!(i.src && i.src.hand), hover: !!i.hover, near: !!i.near })) }),
     where: name => { // centro (en el mundo) de un botón del menú o de la tarjeta: 'heat', 'fg', 'penalty', 'orlando'…, 'salir', 'sonido' o 'card0'
-      const ms = cardG && name.startsWith('card') ? cardG.children.filter(m => m.userData.surf && m.userData.surf.onPress) : menu.children.filter(m => m.userData.surf && m.userData.surf.onPress);
-      const idx = name.startsWith('card') ? +name.slice(4) : ['heat', 'fg', 'penalty', ...ORDER.filter(([k]) => !SPORTS[k]).map(([k]) => k), 'salir', 'sonido'].indexOf(name);
+      const btns = gr => gr.children.filter(m => m.userData.surf && m.userData.surf.onPress);
+      const ms = name.startsWith('card') ? (cardG ? btns(cardG) : []) : name.startsWith('bar') ? btns(bar) : btns(menu);
+      const idx = /^(card|bar)\d$/.test(name) ? +name.slice(-1) : ['heat', 'fg', 'penalty', ...ORDER.filter(([k]) => !SPORTS[k]).map(([k]) => k), 'salir', 'sonido'].indexOf(name);
       const m = ms[idx]; if (!m) return null;
       const p = m.getWorldPosition(new THREE.Vector3()), n = new THREE.Vector3(0, 0, 1).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion()));
       return { p: p.toArray(), n: n.toArray() };
     },
     tip: i => inputs[i].src && inputs[i].src.hand ? inputs[i].tip.toArray() : null,
+    vel: i => inputs[i].pg.v.toArray(), pops: () => popLog.splice(0), hud: () => ({ info: slots.info && slots.info.txt, hint: slots.hint && slots.hint.txt, toast: !!toastS }),
+    palm: i => inputs[i].palmPos.toArray(), grab: i => inputs[i].grabPos.toArray(), kick: () => _dbgKick,
+    ball: () => (kickBall && kickSeen > 0 ? kickBall.getWorldPosition(new THREE.Vector3()).toArray() : null),
+    world: () => (world ? { type: world.type, full: world.full, portal: portal.visible } : null), phase: () => state, spot: () => ({ ...spot, eye }),
     ray: i => { inputs[i].ctl.getWorldPosition(_o); inputs[i].ctl.getWorldQuaternion(_q); return { o: _o.toArray(), d: _d.set(0, 0, -1).applyQuaternion(_q).toArray() }; }
   };
-  return { on: () => !!session, start, end, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
+  return {
+    on: () => !!session, isAR: () => xmode === 'immersive-ar', start, end, showMenu, afterRender, recenter, teleport, gamePoint, eye: () => eye, floorPlace, gameStart, gameEnd, ready, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
 }

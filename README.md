@@ -21,10 +21,15 @@ Varitas, martillo, arco, escudo, lancha, moto acuática, tabla de surf, balones 
 - Héroes (vida de drones y jefe, cada cuánto disparan): `HZ` en `scenes2.js`.
 - Penales (los 3 porteros): `STY` en `scenes2.js`. Postes que se mueven en fútbol americano: `POST_X`, `PUSH_SP` y `CAM_LIFT` en `scenes2.js`.
 - 🥽 Modo Quest (visor Meta Quest): `QUEST` en `xr.js` (distancia del menú, sensibilidad del toque con el dedo, calidad y cuadros por segundo).
+  Golpe con la palma en Penales y Fútbol americano: `HANDKICK` en `xr.js`. Tamaño de la ventana al estadio: `WINDOW` en `xr.js`.
+  Lanzamiento en Miami Heat (distancia para agarrar, fuerza y ayuda hacia el aro): `XRB` en `scenes.js`.
 
 ## 🥽 Modo Quest (Meta Quest 3S)
 
 - Abre el enlace del juego en el navegador del visor (Meta Quest Browser). En «¿Cómo juegas?» aparece **🥽 Modo Quest** (solo en visores; en el celular no sale).
 - Ves tu cuarto (realidad mixta) con un menú flotante. **Toca** los botones con el dedo índice, o **apunta de lejos y junta el índice con el pulgar** (pinza). Con los controles, apunta y usa el gatillo.
-- Primera entrega: el menú, las manos y los paneles 3D. Los deportes (Miami Heat, Penales y Fútbol americano) con las manos llegan en la siguiente.
+- **Penales y Fútbol americano:** el estadio se abre como una ventana frente a ti y el balón flota frente a tu cintura. Golpéalo con la palma: más rápido = más fuerte, hacia arriba = más alto y hacia un lado = apuntas a ese lado.
+- **Miami Heat:** el aro aparece en tu cuarto. Junta los dedos sobre el balón para agarrarlo, lánzalo hacia el aro y suelta. Si lo sueltas hacia el piso, driblas (el ritmo ayuda al tiro perfecto).
+- A tu izquierda hay dos botones: 🏠 Menú y 🌍 Estadio (o Cancha) completo, que cambia la ventana por el estadio entero.
+- Orlando, Isla de Héroes, Miami urbano y el tour acuático dicen «Próximamente en Quest».
 - Para probar en el computador sin visor: el emulador de Meta, Immersive Web Emulator (extensión de Chrome).

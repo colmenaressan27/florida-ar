@@ -530,18 +530,28 @@ const ctx = {
   isHand: () => S.mode === 'hand',
   handVisible: () => S.mode === 'hand' && hand.present,
   gyroOn: () => gyro.on && !!gyro.data, gyroData: () => gyro.data, GAMES, audio: () => (S.sound && ac ? ac : null),
-  footOn: () => footMode, floorPlace: o => floorPlace(o), floorReset: () => footMode && floorReset(), pop, shake, slowmo, best, fx: () => S.fx,
+  footOn: () => footMode || (inXR() && !!(GAMES[S.key] && GAMES[S.key].foot)), // en el visor, los juegos de patada usan el balón que flota frente a ti
+  floorPlace: o => (inXR() ? XRM.floorPlace(o) : floorPlace(o)), floorReset: () => footMode && floorReset(),
+  inXR: () => inXR(), xr: () => XRM, teleport: (x, z) => inXR() && XRM.teleport(x, z), pop, shake, slowmo, best, fx: () => S.fx,
   enter: (k, o) => enter(k, o), win: (k, st) => win(k, st), lose: m => lose(m), ready: () => ready()
 };
 let winStar = null, winT = 0;
 function enter(key, opt = {}) {
   fade(true);
   setTimeout(() => {
+    const xr = inXR(); if (xr) XRM.gameEnd(); // 🥽 deja los materiales como estaban antes de borrar el juego
     if (S.scene && S.scene.dispose) S.scene.dispose();
     if (!GAMES[key] || !GAMES[key].foot) endFoot();
     for (const c of [...root.children]) { root.remove(c); disposeTree(c); }
     scene.fog = null; winStar = null; drag = null; dwell.key = null; trauma.v = 0; slow.t = 0;
     setInfo(''); setHint(''); $('crosshair').classList.add('hidden'); $('arrow').classList.add('hidden'); $('meter').classList.add('hidden');
+    if (xr) { // en el visor: el cofre es el menú 3D y el juego se arma frente a ti (sin intro de cámara)
+      if (key === 'hub') { S.scene = null; S.key = 'quest'; fade(false); XRM.showMenu(); return; }
+      S.key = key; XRM.recenter();
+      S.scene = GAMES[key].create(ctx, { ...opt, xr: true }); XRM.gameStart(S.scene); fade(false);
+      if (opt.quick) startScene(); else stageTitle(key);
+      return;
+    }
     camera.position.set(0, EYE, 0); lookReset(0, 0); setPtr(innerWidth / 2, innerHeight / 2, 'touch');
     S.key = key; refreshTools();
     document.body.classList.toggle('world', key !== 'hub');
@@ -558,6 +568,7 @@ function startScene() { // algunos juegos empiezan con cuenta regresiva 3-2-1-¡
   if (G && G.countdown) countdown(() => { if (S.scene === sc) sc.start(); }); else sc.start();
 }
 function ready() { // la escena terminó su intro: mostrar instrucciones
+  if (inXR()) return XRM.ready(S.key, startScene);
   const G = GAMES[S.key];
   const play = G.foot ? [
     ...(S.cam ? [{ label: '🦶 Patear con mi pie (cámara)', primary: true, fn: () => beginFoot() }] : []),
@@ -694,7 +705,8 @@ function clearScene() { // quita el juego actual (al entrar y salir del visor)
   scene.fog = null; winStar = null; trauma.v = 0; slow.t = 0; setInfo(''); setHint('');
 }
 XRM = initXR({
-  renderer, scene, camera, GAMES, ORDER, stars: S.stars, sfx, audioInit, toastDom: toast, fx: () => S.fx,
+  renderer, scene, camera, root, GAMES, ORDER, stars: S.stars, sfx, audioInit, toastDom: toast, fx: () => S.fx,
+  key: () => S.key, enter: (k, o) => enter(k, o),
   sound: () => S.sound, setSound: v => { S.sound = v; refreshTools(); }, current: () => S.scene,
   onStart() { // al ponerte el visor: se cierran las pantallas del celular, se apaga la cámara de manos y se ajusta la calidad
     closeMenu(); $('card').classList.remove('show'); show(null); hideStage(); $('count').classList.add('hidden');
@@ -738,6 +750,7 @@ renderer.setAnimationLoop(() => {
   }
   sparks.update(sdt);
   renderer.render(scene, camera);
+  if (xrOn) XRM.afterRender();
   drawPip(performance.now());
 });
 updateStars();

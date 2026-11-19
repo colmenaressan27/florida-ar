@@ -247,7 +247,7 @@ function withIntro(ctx, opt, keys, endYaw, endPitch, onEnd) {
   st.finish = () => { if (!st.on) return; st.on = false; path.skip(); ctx.lookReset(endYaw, endPitch); onEnd && onEnd(); if (!opt.quick) ctx.ready(); };
   st.update = dt => { if (!st.on) return; path.update(dt); if (path.done) st.finish(); };
   st.path = path;
-  if (opt.quick) st.finish(); else ctx.hint('Toca la pantalla para saltar la intro ⏭');
+  if (opt.quick || opt.xr) st.finish(); else ctx.hint('Toca la pantalla para saltar la intro ⏭'); // en el visor no hay intro de cámara (confort)
   return st;
 }
 
@@ -1858,6 +1858,7 @@ function heat(ctx, opt) {
   const spot = new V3(0, 1.6, 0), spotFrom = new V3(0, 1.6, 0); let spotT = 1;
   function moveSpot(i) {
     const S2 = SPOTS[i % SPOTS.length]; spotFrom.copy(camera.position); spot.set(S2[0], 1.6, S2[1]); spotT = 0;
+    if (opt.xr) { spotT = 1; ctx.teleport(S2[0], S2[1]); } // 🥽 en el visor: salto con fundido (sin desplazar la vista)
     ctx.toast(`📍 Nueva posición: ${S2[2]}`, 2500);
   }
   function drawBoard() {
@@ -1873,6 +1874,56 @@ function heat(ctx, opt) {
   const handPos = o => camera.localToWorld(o.copy(HOLD));
   const setPos = o => camera.localToWorld(o.set(SETP.x + set.lat * 0.08, SETP.y, SETP.z));
   ball.position.copy(handPos(_h));
+  // ===== 🥽 Quest: agarrar con la pinza, driblar soltándolo hacia tu piso y lanzar con el brazo (xr.js da la posición y velocidad de tu mano) =====
+  // GRAB_R: a qué distancia de tu mano puedes agarrar el balón (m) · THROW_K: multiplica la fuerza de tu lanzamiento
+  // ASSIST: 0 a 1, cuánto se corrige el tiro hacia el aro si apuntas más o menos bien · AIM_DEG: hasta qué ángulo ayuda
+  // PERFECT: qué tan parecido al tiro ideal debe ser para «¡PERFECTO!» (más grande = más fácil)
+  const XRB = { GRAB_R: 0.24, THROW_K: 1.1, ASSIST: 0.55, AIM_DEG: 30, PERFECT: 0.14 };
+  let held = null;
+  const home = o => ctx.xr().gamePoint(0.15, ctx.xr().eye() - 0.45, -0.38, o); // el balón te espera flotando frente a tu pecho
+  function xrInput(type, inp) {
+    if (!running) return;
+    if (type === 'selectstart' || type === 'squeezestart') {
+      if (held || !inp.ok || (st.mode === 'fly' && !st.drib && st.t < 0.6)) return; // un tiro recién lanzado no se agarra
+      if (inp.grabPos.distanceTo(ball.position) > XRB.GRAB_R + BR) return;
+      held = inp; st.mode = 'held'; ctx.sfx('pickup'); ctx.xr().haptic(0.4, 40, inp);
+    } else if ((type === 'selectend' || type === 'squeezeend') && held === inp) xrRelease();
+  }
+  function xrRelease() {
+    const inp = held; held = null; if (!inp) return;
+    const v = _k.copy(inp.pg.v).multiplyScalar(XRB.THROW_K);
+    Object.assign(st, { mode: 'fly', t: 0, scored: false, inNet: 0, rim: false, slowed: false, err: 0, perfect: false, lastBounce: -1, drib: true });
+    st.v.copy(v);
+    const toR = _r.copy(RIM).sub(ball.position), hd = Math.hypot(toR.x, toR.z), hs = Math.hypot(v.x, v.z);
+    if (v.y < 0 || hs < 0.4 || v.length() < 1.2) return; // hacia abajo (o sin fuerza): es un dribleo, el balón rebota y lo vuelves a agarrar
+    st.drib = false;
+    const ang = THREE.MathUtils.radToDeg(Math.acos(clamp((v.x * toR.x + v.z * toR.z) / (hs * hd), -1, 1)));
+    if (ang < XRB.AIM_DEG) { // apuntaste al aro: el tiro se corrige un poco (y del todo si fue casi perfecto)
+      // tiro ideal en arco: entra al aro cayendo con al menos 40° (si llega plano, choca con el borde del aro)
+      const T = clamp(Math.max(hd / hs, Math.sqrt(2 * (Math.max(toR.y, 0.1) + 0.84 * hd) / GRAV)), 0.6, 1.8), ideal = _q.copy(toR).divideScalar(T); ideal.y += 0.5 * GRAV * T;
+      st.perfect = v.distanceTo(ideal) / ideal.length() < XRB.PERFECT + Math.min(drib.n, 4) * 0.02 + (fire ? 0.02 : 0);
+      st.v.lerp(ideal, st.perfect ? 1 : XRB.ASSIST);
+    }
+    shots++; drib.n = 0; info(); ctx.sfx('throw');
+    if (st.perfect) { ctx.pop('¡PERFECTO!'); ctx.sfx('perfect'); }
+  }
+  function xrBall(dt) { // devuelve true si el visor se encargó del balón en este cuadro
+    if (st.mode === 'held') {
+      if (!held || !held.src) { held = null; st.mode = 'rest'; return true; }
+      _d.copy(held.grabPos).sub(held.palmPos); const L = _d.length(); // el balón queda justo delante de tus dedos
+      ball.position.copy(held.grabPos).addScaledVector(_d, L > 0.01 ? 0.07 / L : 0); ball.rotation.y += dt; return true;
+    }
+    if (st.mode === 'rest' || st.mode === 'drib') {
+      ball.position.lerp(home(_h), 0.12); ball.rotation.y += dt;
+      if (drib.n && performance.now() - drib.last > 3000) drib.n = 0;
+      return true;
+    }
+    return false; // en el aire: la física de siempre (aro, tablero y piso)
+  }
+  function xrDribble() { // cada bote contra tu piso cuenta para el ritmo (agranda el margen del tiro perfecto)
+    drib.n++; drib.last = performance.now(); ctx.sfx('dribble');
+    if (drib.n >= 2 && drib.n <= 4) ctx.pop(`RITMO x${drib.n}`, 'small');
+  }
   // medidor de tiro: se llena en FILL segundos; la zona verde está centrada en GREEN
   const meterEl = document.getElementById('meter'), zoneEl = meterEl.querySelector('.zone'), markEl = meterEl.querySelector('.mark');
   const FILL = 0.95, GREEN = 0.86;
@@ -1941,11 +1992,12 @@ function heat(ctx, opt) {
     { t: 2.8, p: [1.5, 3.5, 5], yaw: 0.1, pitch: -0.05 },
     { t: 4.3, p: [0, 1.6, 0], yaw: 0, pitch: 0.18 }
   ], 0, 0.15);
-  const startHint = () => alive && ctx.hint(ctx.isHand()
+  const startHint = () => alive && ctx.hint(opt.xr ? '🤏 Junta los dedos sobre el balón para agarrarlo · lánzalo hacia el aro y suelta · suéltalo hacia el piso para driblar' : ctx.isHand()
     ? '✋ Baja la mano rápido para <b>driblar</b> · súbela para <b>preparar</b> y lánzala hacia arriba cuando la marca esté en el <b>VERDE</b>'
     : '👆 <b>Toca</b> para driblar · <b>mantén</b> presionado y <b>suelta</b> cuando la marca esté en el <b>VERDE</b>');
   return {
-    camLock: !opt.quick, refreshHint: startHint,
+    camLock: !opt.quick, refreshHint: startHint, xrWorld: { type: 'room', keep: [H1.h, ball] }, xrInput,
+    _dbg: { baskets: () => baskets, shots: () => shots, mode: () => st.mode, ball: () => ball.position.toArray(), rim: () => RIM.toArray() },
     start() { running = true; this.camLock = false; info(); startHint(); },
     onDown(p) {
       if (intro.on) { intro.finish(); this.camLock = false; return; }
@@ -2009,6 +2061,7 @@ function heat(ctx, opt) {
       ball.visible = !intro.on;
       if (fire && ball.visible && Math.random() < 0.6) ctx.burst(ball.position, [0xff6a1a, 0xffb000, 0xffe08a], 1, 0.5);
       // balón
+      if (opt.xr && xrBall(dt)) return;
       if (st.mode === 'rest') { ball.position.lerp(handPos(_h), 0.3); ball.rotation.y += dt; if (drib.n && performance.now() - drib.last > 3000) drib.n = 0; return; }
       if (st.mode === 'drib') {
         drib.t += dt; const p = drib.t / DRIB_T, H = handPos(_h);
@@ -2041,17 +2094,17 @@ function heat(ctx, opt) {
         }
         if (!st.scored && st.v.y < 0 && prevY >= RIM.y && Pp.y < RIM.y && L < RR - BR * 0.3) score();
         if (st.inNet > 0) { st.inNet -= h; st.v.x *= 0.9; st.v.z *= 0.9; st.v.y = Math.max(st.v.y, -2.5); Pp.x = lerp(Pp.x, RIM.x, 0.1); Pp.z = lerp(Pp.z, RIM.z, 0.1); }
-        if (Pp.y < BR) { Pp.y = BR; if (st.v.y < -1 && st.t - st.lastBounce > 0.15) { ctx.sfx('bounce'); st.lastBounce = st.t; } st.v.y *= -0.72; st.v.x *= 0.85; st.v.z *= 0.85; }
+        if (Pp.y < BR) { Pp.y = BR; if (st.v.y < -1 && st.t - st.lastBounce > 0.15) { ctx.sfx('bounce'); st.lastBounce = st.t; if (st.drib) xrDribble(); } st.v.y *= -0.72; st.v.x *= 0.85; st.v.z *= 0.85; }
       }
       if (st.perfect && !st.slowed && Pp.distanceTo(RIM) < 1.4 && st.v.y < 0) { st.slowed = true; ctx.slowmo(0.5, 0.35); } // cámara lenta en el tiro perfecto
       ball.rotation.x -= dt * 8;
       st.t += dt;
       if (st.t > 2.8) {
         st.mode = 'rest';
-        if (!st.scored && running) {
+        if (!st.scored && running && !st.drib) {
           if (fire) { fire = false; ctx.pop('SE APAGÓ EL FUEGO', 'bad'); drawBoard(); }
           streak = 0; info();
-          ctx.hint(st.perfect ? '¡Casi! Rebotó en el aro. ¡Otra vez!' : st.err < 0 ? 'Soltaste muy pronto ⏳ espera a que la marca llegue al <b>VERDE</b>' : 'Soltaste muy tarde ⏩ suelta cuando la marca esté en el <b>VERDE</b>');
+          ctx.hint(opt.xr ? '¡Casi! Lanza el balón hacia arriba, en arco, apuntando al aro' : st.perfect ? '¡Casi! Rebotó en el aro. ¡Otra vez!' : st.err < 0 ? 'Soltaste muy pronto ⏳ espera a que la marca llegue al <b>VERDE</b>' : 'Soltaste muy tarde ⏩ suelta cuando la marca esté en el <b>VERDE</b>');
           setTimeout(() => { if (running) startHint(); }, 2400);
         }
       }
