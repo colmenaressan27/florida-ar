@@ -93,6 +93,7 @@ h2,.px{font-family:var(--font-px);font-weight:400;font-size:16px;line-height:1.6
 .opt-i{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-size:26px;background:linear-gradient(135deg,var(--sea),#2a6bff)}
 .opt-t b{display:block;font-size:19px;font-weight:800}
 .opt-t small{display:block;font-size:14px;line-height:1.35;color:var(--text2)}
+.opt.quest .opt-i{background:linear-gradient(135deg,var(--pink),#7a2cff)}
 .opt.rec{border-color:var(--sun);background:rgba(255,213,74,.1)}
 .opt.rec::after{content:"RECOMENDADO";position:absolute;top:-9px;right:12px;font:8px/1 var(--font-px);color:var(--ink);background:var(--sun);padding:5px 7px;border-radius:6px}
 .opt:disabled{opacity:.4}

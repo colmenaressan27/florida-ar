@@ -6,6 +6,7 @@ import { createHub, GAMES as G1, Sparks, starMesh, disposeTree, setQuality } fro
 import { GAMES2 } from './scenes2.js';
 import { startFoot, stopFoot, foot } from './footTracking.js';
 import { preloadModels } from './models.js';
+import { initXR, QUEST } from './xr.js';
 preloadModels(); // tus modelos 3D (assets/modelos) se cargan desde el inicio, mientras la persona lee la bienvenida
 const GAMES = { ...G1, ...GAMES2 };
 const ORDER = [['orlando', '🏰'], ['heroes', '🦸'], ['city', '🌆'], ['miami', '🚤'], ['heat', '🏀'], ['fg', '🏈'], ['penalty', '⚽']];
@@ -15,6 +16,7 @@ const video = $('cam');
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent));
 const S = { mode: 'touch', stars: Object.fromEntries(ORDER.map(([k]) => [k, 0])), quality: isMobile ? 1 : 2, sound: true, cam: false, mirror: false, pts: false, key: null, scene: null };
 const EYE = 1.6;
+let XRM = null; const inXR = () => !!(XRM && XRM.on()); // 🥽 Modo Quest (xr.js): en el visor, ventanas y avisos se dibujan en 3D
 
 /* ================= 3D ================= */
 const renderer = new THREE.WebGLRenderer({ canvas: $('scene'), alpha: true, antialias: true, powerPreference: 'high-performance' });
@@ -28,11 +30,12 @@ const scene = new THREE.Scene();
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(60, 1, 0.03, 600);
 camera.position.set(0, EYE, 0);
-scene.add(camera);
+const rig = new THREE.Group(); scene.add(rig); rig.add(camera); // en el visor, la cabeza y las manos se mueven dentro de este grupo
 const root = new THREE.Group(); scene.add(root);           // escenario activo
 const sparks = new Sparks(); scene.add(sparks.points);       // partículas compartidas
 
 function resize() {
+  if (renderer.xr.isPresenting) return; // en el visor el tamaño lo pone el visor
   const w = innerWidth, h = innerHeight;
   renderer.setSize(w, h);
   camera.aspect = w / h; camera.fov = w < h ? 70 : 55; camera.updateProjectionMatrix();
@@ -264,6 +267,7 @@ function show(id) { document.querySelectorAll('.screen').forEach(s => s.classLis
 // La fuente pixel no trae letras con tilde: en los textos pixel se quitan las tildes (la ñ se conserva), como en las máquinas arcade.
 const pxText = s => String(s).normalize('NFD').replace(/[̀-̂̄-ͯ]/g, '').normalize('NFC');
 function card(title, html, btns, kind = '') { // tarjeta (ventana) con título pixel; kind: '' | 'win' | 'lose' | 'how'
+  if (inXR()) return XRM.card(title, html, btns, kind);
   const c = $('card');
   c.dataset.kind = kind;
   c.querySelector('h2').textContent = pxText(title);
@@ -284,6 +288,7 @@ const store = { get: (k, d) => { try { const v = localStorage.getItem('fl_' + k)
 S.fx = store.get('fx', !reduceMotion); // false = «Reducir efectos» (sin sacudidas ni cámara lenta)
 let stageT = null;
 function stageTitle(key) { // título pixel al entrar a cada minijuego + jingle de «entrar al videojuego»
+  if (inXR()) { sfx('stage'); return XRM.pop(GAMES[key].pix || GAMES[key].short); }
   const G = GAMES[key], n = ORDER.findIndex(([k]) => k === key) + 1, st = $('stage');
   st.querySelector('.stage-n').textContent = `STAGE ${n}`;
   st.querySelector('.stage-t').textContent = pxText(G.pix || G.short.toUpperCase());
@@ -295,6 +300,7 @@ function stageTitle(key) { // título pixel al entrar a cada minijuego + jingle 
 function hideStage() { const st = $('stage'); if (st.classList.contains('hidden')) return; st.classList.add('out'); clearTimeout(stageT); stageT = setTimeout(() => st.classList.add('hidden'), 320); }
 $('stage').onclick = hideStage;
 function countdown(cb) { // 3 · 2 · 1 · ¡YA!
+  if (inXR()) return XRM.countdown(cb);
   const el = $('count'); let n = 3;
   const step = () => {
     el.textContent = n > 0 ? String(n) : '¡YA!'; el.classList.remove('hidden', 'bump'); void el.offsetWidth; el.classList.add('bump');
@@ -304,11 +310,12 @@ function countdown(cb) { // 3 · 2 · 1 · ¡YA!
   step();
 }
 function pop(text, kind = 'good') { // mensaje pixel en el centro: «¡PERFECTO!», «+3», «¡EN LLAMAS!»…
+  if (inXR()) return XRM.pop(text, kind);
   const el = document.createElement('div'); el.className = 'pop ' + kind; el.textContent = pxText(text);
   $('pops').appendChild(el); setTimeout(() => el.remove(), 1150);
 }
 const trauma = { v: 0 }, slow = { t: 0, k: 1 };
-const shake = a => { if (S.fx) trauma.v = Math.min(1, trauma.v + a); };
+const shake = a => { if (inXR()) return XRM.shake(a); if (S.fx) trauma.v = Math.min(1, trauma.v + a); };
 const slowmo = (dur, k) => { if (S.fx) { slow.t = dur; slow.k = k; } };
 function best(key, value, lowerIsBetter = false) { // guarda el récord de cada juego en este celular; devuelve si es nuevo récord
   const old = store.get('best_' + key, null), isNew = old === null || (lowerIsBetter ? value < old : value > old);
@@ -316,11 +323,11 @@ function best(key, value, lowerIsBetter = false) { // guarda el récord de cada 
   return { isNew, best: isNew ? value : old };
 }
 let toastT;
-function toast(msg, ms = 3000) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), ms); }
-function setInfo(t) { $('info').innerHTML = t || ''; $('info').classList.toggle('hidden', !t); }
-function setHint(t) { $('hint').innerHTML = t || ''; $('hint').classList.toggle('hidden', !t); }
-function flash(kind = 'red') { const f = $('flash'); f.className = kind; f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on'))); }
-function fade(on) { $('fade').classList.toggle('on', on); }
+function toast(msg, ms = 3000) { if (inXR()) return XRM.toast(msg, ms); const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), ms); }
+function setInfo(t) { if (inXR()) return XRM.info(t); $('info').innerHTML = t || ''; $('info').classList.toggle('hidden', !t); }
+function setHint(t) { if (inXR()) return XRM.hint(t); $('hint').innerHTML = t || ''; $('hint').classList.toggle('hidden', !t); }
+function flash(kind = 'red') { if (inXR()) return XRM.flash(kind); const f = $('flash'); f.className = kind; f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on'))); }
+function fade(on) { if (inXR()) return XRM.fade(on); $('fade').classList.toggle('on', on); }
 const NAMES = ORDER;
 function updateStars() { // barra de progreso: ⭐ n/7 y un punto por destino
   const n = ORDER.filter(([k]) => S.stars[k]).length;
@@ -629,9 +636,12 @@ function goControls() {
   $('optHand').disabled = !S.cam;
   $('optHand').classList.toggle('rec', !isMobile && S.cam);
   $('optTouch').classList.toggle('rec', isMobile || !S.cam);
+  if (!$('optQuest').classList.contains('hidden') && /OculusBrowser|Quest/i.test(navigator.userAgent)) { // en el visor se recomienda el Modo Quest
+    $('optHand').classList.remove('rec'); $('optTouch').classList.remove('rec'); $('optQuest').classList.add('rec');
+  }
   show('controls');
 }
-document.querySelectorAll('.opt').forEach(b => b.onclick = () => { sfx('click'); chooseMode(b.dataset.m); });
+document.querySelectorAll('.opt[data-m]').forEach(b => b.onclick = () => { sfx('click'); chooseMode(b.dataset.m); });
 async function chooseMode(m) {
   audioInit(); requestGyro(); keepAwake(); show(null);
   $('hud').classList.remove('hidden'); updateStars();
@@ -677,21 +687,42 @@ $('bGyro').onclick = () => {
 };
 $('bFx').onclick = () => { S.fx = !S.fx; store.set('fx', S.fx); refreshTools(); sfx('click'); toast(S.fx ? '✨ Efectos completos: sacudidas y cámara lenta' : 'Efectos reducidos: sin sacudidas ni cámara lenta', 2000); };
 
+/* ================= 🥽 Modo Quest (xr.js) ================= */
+function clearScene() { // quita el juego actual (al entrar y salir del visor)
+  if (S.scene && S.scene.dispose) S.scene.dispose();
+  S.scene = null; for (const c of [...root.children]) { root.remove(c); disposeTree(c); }
+  scene.fog = null; winStar = null; trauma.v = 0; slow.t = 0; setInfo(''); setHint('');
+}
+XRM = initXR({
+  renderer, scene, camera, GAMES, ORDER, stars: S.stars, sfx, audioInit, toastDom: toast, fx: () => S.fx,
+  sound: () => S.sound, setSound: v => { S.sound = v; refreshTools(); }, current: () => S.scene,
+  onStart() { // al ponerte el visor: se cierran las pantallas del celular, se apaga la cámara de manos y se ajusta la calidad
+    closeMenu(); $('card').classList.remove('show'); show(null); hideStage(); $('count').classList.add('hidden');
+    endFoot(); if (handsOn) { stopHands(); handsOn = false; hand.present = false; $('cursor').style.opacity = 0; }
+    clearScene(); S.key = 'quest'; $('hud').classList.add('hidden');
+    setQuality(QUEST.SHADOWS ? 1 : 0); renderer.shadowMap.enabled = QUEST.SHADOWS;
+  },
+  onEnd() { // al salir: de vuelta a «¿Cómo juegas?» con todo como estaba
+    clearScene(); S.key = null; applyQuality(S.quality); lookReset(0, 0); goControls();
+  }
+});
+
 /* ================= Bucle principal ================= */
 const clock = new THREE.Clock(); let T = 0;
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05); T += dt;
-  if (!(S.scene && S.scene.camLock)) applyLook();
+  const xrOn = inXR(); // en el visor la cabeza mueve la cámara: sin giroscopio, sin arrastre y sin sacudidas
+  if (xrOn) XRM.frame(dt);
+  else if (!(S.scene && S.scene.camLock)) applyLook();
   // con la mano en los bordes de la pantalla también se puede girar la vista (computador sin giroscopio)
   if (S.mode === 'hand' && hand.present && !gyro.on && S.scene && S.scene.look && !blocked()) {
     const ex = hand.x / innerWidth;
     if (ex < 0.1) look.yaw += dt * 0.9; else if (ex > 0.9) look.yaw -= dt * 0.9;
   }
-  ptr.ray.setFromCamera(ptr.ndc, camera);
-  updateDwell(dt);
+  if (!xrOn) { ptr.ray.setFromCamera(ptr.ndc, camera); updateDwell(dt); }
   const sdt = slow.t > 0 ? dt * slow.k : dt; if (slow.t > 0) slow.t -= dt; // cámara lenta en momentos clave
   if (S.scene && S.scene.update) S.scene.update(sdt, T);
-  if (trauma.v > 0) { // sacudida de cámara (trauma²): fuerte al golpe y se calma sola
+  if (trauma.v > 0 && !xrOn) { // sacudida de cámara (trauma²): fuerte al golpe y se calma sola
     const a = trauma.v * trauma.v * 0.035; camera.rotateX((Math.random() - 0.5) * a); camera.rotateY((Math.random() - 0.5) * a);
     trauma.v = Math.max(0, trauma.v - dt * 1.6);
   }
@@ -710,7 +741,7 @@ renderer.setAnimationLoop(() => {
   drawPip(performance.now());
 });
 updateStars();
-if (location.search.includes('debug')) window.__fl = { S, enter, ctx, camera, root, look, onFoot, beginFoot, startScene };
+if (location.search.includes('debug')) window.__fl = { S, enter, ctx, camera, root, look, onFoot, beginFoot, startScene, xr: XRM };
 
 // Calidad: bajo / medio / alto (resolución y sombras)
 function applyQuality(q) {

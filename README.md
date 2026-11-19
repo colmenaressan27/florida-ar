@@ -20,3 +20,11 @@ Varitas, martillo, arco, escudo, lancha, moto acuática, tabla de surf, balones 
 - Gestos de Orlando (⚡ zigzag, ➖ línea, ⭕ círculo): `GEST` en `gestures.js`; tiempos del duelo: `DUEL` en `scenes.js`.
 - Héroes (vida de drones y jefe, cada cuánto disparan): `HZ` en `scenes2.js`.
 - Penales (los 3 porteros): `STY` en `scenes2.js`. Postes que se mueven en fútbol americano: `POST_X`, `PUSH_SP` y `CAM_LIFT` en `scenes2.js`.
+- 🥽 Modo Quest (visor Meta Quest): `QUEST` en `xr.js` (distancia del menú, sensibilidad del toque con el dedo, calidad y cuadros por segundo).
+
+## 🥽 Modo Quest (Meta Quest 3S)
+
+- Abre el enlace del juego en el navegador del visor (Meta Quest Browser). En «¿Cómo juegas?» aparece **🥽 Modo Quest** (solo en visores; en el celular no sale).
+- Ves tu cuarto (realidad mixta) con un menú flotante. **Toca** los botones con el dedo índice, o **apunta de lejos y junta el índice con el pulgar** (pinza). Con los controles, apunta y usa el gatillo.
+- Primera entrega: el menú, las manos y los paneles 3D. Los deportes (Miami Heat, Penales y Fútbol americano) con las manos llegan en la siguiente.
+- Para probar en el computador sin visor: el emulador de Meta, Immersive Web Emulator (extensión de Chrome).
