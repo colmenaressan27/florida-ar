@@ -1,19 +1,19 @@
 # CONTEXTO — florida-ar
 
 > Memoria viva del proyecto para personas e IAs: qué es, cómo va, qué se decidió y qué sigue.
-> Última actualización: 2026-11-20 11:40 · rama main · commit 4049c31 · sin versión
+> Última actualización: 2026-11-20 13:38 · rama main · commit c5c94fe · sin versión
 > Cómo mantenerlo: AGENTS.md → «Al terminar un bloque de trabajo».
 
 <!-- hilo:estado:inicio -->
 ## Estado actual
 - **Qué es:** juego web de realidad aumentada para una feria universitaria: un cofre abre 7 minijuegos arcade sobre Florida y cada uno da 1 estrella.
 - **Fase:** MVP (rediseño arcade: fases 1 y 2 terminadas, commit 1.1).
-- **Funciona hoy:** los 7 minijuegos en celular con 3 modos de control: táctil, mano (índice frente a la cámara trasera) y pie (patada con la cámara trasera sobre el piso real) en los deportes.
-- **Modo Quest VR-1 y VR-2 hechos** (base en `xr.js`): botón 🥽 solo en visores con WebXR, menú 3D con el índice o rayo, tarjetas y cuenta regresiva en 3D, confort y calidad. Es aparte y opcional: los modos del celular no cambian.
-- **Deportes y mundos en el Quest:** Touchdown NFL y Penales MLS en realidad mixta (ventana al estadio, golpe con la palma); Miami Heat rehecho en el cuarto (agarre con la palma, dribleo, barra de tiro, zonas y clavada). Orlando e Isla de Héroes en VR completa (hechizos y escudo con las manos). Miami urbano y tour acuático muestran aún una tarjeta.
+- **Funciona hoy:** los 7 minijuegos en celular con 3 modos de control: táctil, mano (índice frente a la cámara trasera) y pie (patada con la cámara trasera sobre el piso real) en los deportes. La orilla del tour acuático ya no deja pasar el agua por la arena (corregido, sin probar en celular).
+- **Urgente:** el sitio publicado (1.4.2) tiene un fallo: un comentario en `game.js` anulaba `ctx.pop`, `shake`, `slowmo`, `best` y `fx`, y los juegos se caían. Corregido en local; falta commit y push.
+- **Modo Quest completo (sin probar en Quest real):** los 7 juegos se eligen en el visor. Deportes en realidad mixta; Orlando, Isla de Héroes, Miami urbano y tour acuático en VR (fila de 4 mundos en el menú 3D).
 - **Modo «🦶 Con mis pies (PC)»** (nuevo, sin probar): Touchdown NFL y Penales MLS; `sensor.html` en una PC detecta la patada y la envía al visor por PeerJS con un código de 4 dígitos.
-- **Siguiente paso:** probar en Quest 3S real VR-1, VR-2, el Miami Heat nuevo, Orlando e Héroes en VR y el modo pies con una PC (ajustar HANDKICK, XRB, KICKCAM, XO.PX y XH.SHIELD_R); revisar si la red de la feria deja conectar PeerJS (si no, hotspot de celular).
-- **Bloqueos / riesgos:** nada de las sesiones del 2026-11-20 (Miami Heat nuevo, modo pies, Orlando e Héroes en VR) se probó (ni emulador, pedido de Cielo). Quest verificado solo con IWER; PeerJS depende de un servicio externo gratuito e internet. El Quest no sigue los pies: la patada en el visor es con la mano.
+- **Siguiente paso:** hacer commit y push; probar en Quest 3S real Miami urbano y tour acuático, y después VR-1, VR-2, Miami Heat, Orlando, Héroes y el modo pies (ajustar HANDKICK, XRB, KICKCAM, XO.PX, XH.SHIELD_R, XC y XW); revisar en el celular la orilla nueva.
+- **Bloqueos / riesgos:** nada de lo del 2026-11-20 está probado (ni emulador, pedido de Cielo). Quest verificado solo con IWER; PeerJS depende de un servicio externo gratuito e internet. El Quest no sigue los pies: la patada en el visor es con la mano.
 <!-- hilo:estado:fin -->
 
 ## 1. Propósito y alcance
@@ -62,7 +62,8 @@ JUEGO.md            biblia del juego: arte, game feel, decisiones de diseño
 ## 4. Convenciones
 - Código, comentarios y textos en español. Los textos en fuente pixel van sin tildes (`pxText`), porque «Press Start 2P» no las trae.
 - Cada minijuego es una función `(ctx, opt)` que devuelve `{ start, update, dispose, tap/onDown/onMove/onUp… }`; se registra en `GAMES`/`GAMES2` con `pix`, `tag`, `how` y `fact`.
-- Los ajustes que Cielo puede tocar van en constantes con nombre al inicio de cada sección (`KICK`, `KICKCAM`, `FLOOR`, `GEST`, `DUEL`, `HZ`, `STY`, `POST_X`, `QUEST`, `XZ`, `XO`, `XH`), con un comentario en español.
+- Los ajustes que Cielo puede tocar van en constantes con nombre al inicio de cada sección (`KICK`, `KICKCAM`, `FLOOR`, `GEST`, `DUEL`, `HZ`, `STY`, `POST_X`, `QUEST`, `XZ`, `XO`, `XH`, `XC`, `XW`, `SHORE`), con un comentario en español.
+- En el visor, `spot.y` es la altura del piso donde estás parado; `gamePoint(dx, y, dz)` usa `y` sobre ese piso.
 - Nada de recursos protegidos: modelos y texturas originales o dibujados por código; sonidos sintetizados con Web Audio.
 - Commits: los hace Cielo (mensajes cortos tipo «1.0.2», «1.1»).
 
@@ -84,13 +85,20 @@ JUEGO.md            biblia del juego: arte, game feel, decisiones de diseño
 | 2026-11-20 | Mundos en el Quest (Orlando, Héroes) en VR completa con manos virtuales de puntos, no en realidad mixta | los mundos son escenas propias; la realidad mixta no encajaba | realidad mixta para los mundos |
 | 2026-11-20 | Orlando en el Quest: hechizos dibujados con la pinza sostenida (gestures.js sobre el plano de la vista), no detección automática por velocidad | evita hechizos falsos al mover la mano | detección por velocidad, como en el celular |
 | 2026-11-20 | Héroes en el Quest: bloqueo con escudo en la mano izquierda y esquivar moviéndose, sin botón de cubrirse | más físico y acorde al visor | botón de cubrirse |
+| 2026-11-20 | Orilla (tour acuático y Miami urbano): el mar pasa bajo la arena con olas que nunca la alcanzan, más una rampa de arena mojada inclinada (`shoreRamp()`) | superficies casi paralelas (agua y arena) se mezclan; la rampa da una línea de orilla limpia que se mueve con las olas | cortar el plano del mar en la orilla (el borde quedaba flotando o dejaba huecos) |
+| 2026-11-20 | Tour acuático en el visor: el vehículo te lleva moviendo el grupo de la cámara con `ride()`, sin recentrar la cabeza cada cuadro | recentrar cada cuadro anularía el movimiento real de la cabeza y marearía | mover el mundo en vez de ti (rompía chispas y textos) |
+| 2026-11-20 | Carril del tour en el visor: inclinar el cuerpo como principal, con ◀ ▶ y palanca de respaldo | deja las manos libres para las fotos y es más inmersivo | carril según la posición de la mano (chocaba con apuntar a los animales) |
+| 2026-11-20 | Miami urbano en el visor: apuntar y juntar los dedos (pinza) atrae el objeto a la mano | los objetos están a 9–16 m y el cuarto real es pequeño | caminar o teletransportarse hasta cada objeto (60 s no alcanzan) |
 
 ## 6. Pendientes
 - [x] Modo Quest, VR-1: base (WebXR, manos, menú 3D, paneles, confort, calidad).
 - [x] Modo Quest, VR-2: Miami Heat, Penales y Fútbol americano en realidad mixta (sin probar en Quest real).
 - [x] Modo Quest: Orlando e Isla de Héroes en VR (sin probar en Quest real).
 - [ ] Probar Orlando e Héroes en Quest 3S real (reconocimiento de figuras y XO.PX; tamaño del escudo XH.SHIELD_R y puntería).
-- [ ] Modo Quest, después: Miami urbano y tour acuático.
+- [x] Modo Quest: Miami urbano y tour acuático en el visor (2026-11-20, sin probar en Quest real).
+- [ ] Hacer commit y push pronto: el sitio publicado (1.4.2) tiene el fallo de `ctx.pop`.
+- [ ] Probar en Quest 3S real Miami urbano y tour acuático (mareo, inclinación `XW.LEAN`, marco de fotos, flecha `XC`).
+- [ ] Revisar en el celular que la orilla nueva se vea bien.
 - [ ] Probar en iPhone real y en Quest 3S real (patada, mano, gestos, giroscopio).
 - [ ] Probar VR-1 y VR-2 en Quest 3S real; ajustar HANDKICK (`xr.js`) y XRB (`scenes.js`).
 - [ ] Probar el Miami Heat nuevo en Quest 3S real (barra, zonas, clavada).
@@ -108,9 +116,19 @@ JUEGO.md            biblia del juego: arte, game feel, decisiones de diseño
 - Sesión 2026-11-20 (Orlando e Héroes en VR): nada se probó, ni con emulador; solo sintaxis (pedido de Cielo).
 - «Touchdown» no es técnicamente lo que pasa en el juego (es un gol de campo); se usó por pedido de Cielo.
 - Modo pies: PeerJS depende de un servicio externo gratuito y de internet.
+- Fallo de `ctx.pop` de 1.4.2: corregido en el código local; falta publicar (commit y push).
+- Riesgo de mareo en el tour en el visor (primer juego con movimiento continuo).
+- En el tour del visor, si te quedas inclinado más de 4 s y luego vuelves al centro, puede cambiar de carril al lado contrario.
 
 ## 8. Bitácora
 <!-- Entradas nuevas ARRIBA. Aquí se conservan las últimas 8; las anteriores se archivan solas en .hilo/historial.md -->
+### 2026-11-20 · v1.4.3 · Claude Code
+- Arreglo urgente en `game.js` (objeto ctx): en 1.4.2 un comentario `//` a mitad de línea anulaba `pop`, `shake`, `slowmo`, `best` y `fx` (57 llamadas); los juegos se caían en el celular y en el visor. Corregido; `ctx.teleport` ahora recibe también la altura del piso (y).
+- Orilla del tour acuático (`scenes2.js`, constante `SHORE` y `shoreRamp()`): el mar pasaba bajo la arena y sus olas la cubrían en parches. Mar a −0.4 m, olas más bajas, rampa de arena mojada bajo el agua y manatíes mar adentro. Miami urbano usa lo mismo; afecta también al celular.
+- Modo Quest completo: los 7 juegos se eligen en el visor; el menú tiene una fila de 4 mundos en VR (se quitaron «Próximamente»). `xr.js`: `spot.y`, `ride()` (vehículo sin fundido ni recentrar la cabeza) y `xrRayLen(inp)` opcional en las escenas.
+- Miami urbano en el visor (`scenes2.js`, `XC`): apareces en la acera de Ocean Drive; apuntar y juntar los dedos atrae el objeto a la mano; flecha 3D hacia el más cercano; 60 s.
+- Tour acuático en el visor (`scenes2.js`, `XW`): esperas en un muelle y avanza solo; carril por inclinación del cuerpo, o ◀ ▶ o palanca; fotos apuntando al animal y pinza; contra el mareo, vista sin balanceo y 80 % de velocidad.
+- `README.md` actualizado. Verificación: solo `node --check` de xr.js, game.js, scenes.js y scenes2.js; sin pruebas (ni emulador ni dispositivo), por pedido de Cielo.
 ### 2026-11-20 · sin versión · Claude Code
 - Orlando en el visor (`scenes.js`, bloque XO): vitrina de varitas flotante, varita en la mano derecha, hechizos dibujados en el aire con la pinza sostenida (`gestures.js` proyecta el trazo al plano de la vista), palma abierta = escudo y leyenda de hechizos en 3D con demostración en chispas. Se aparece frente al mago con fundido.
 - Isla de Héroes en el visor (`scenes2.js`, bloque XH): vitrina de poderes y botones, arma en la mano derecha (apuntar y pinza para atacar, escudo con gesto), escudo de energía en la mano izquierda que bloquea bolas rojas, y esquivar moviéndose («¡ESQUIVADA!»). Ambas escenas usan la posición real de la cabeza en el mundo.

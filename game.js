@@ -532,7 +532,8 @@ const ctx = {
   gyroOn: () => gyro.on && !!gyro.data, gyroData: () => gyro.data, GAMES, audio: () => (S.sound && ac ? ac : null),
   footOn: () => footMode || (inXR() && !!(GAMES[S.key] && GAMES[S.key].foot)), // en el visor, los juegos de patada usan el balón que flota frente a ti
   floorPlace: o => (inXR() ? XRM.floorPlace(o) : floorPlace(o)), floorReset: () => footMode && floorReset(),
-  inXR: () => inXR(), xr: () => XRM, teleport: (x, z, fx, fz) => inXR() && XRM.teleport(x, z, fx, fz), // (fx, fz): punto al que quedas mirando pop, shake, slowmo, best, fx: () => S.fx,
+  inXR: () => inXR(), xr: () => XRM, pop, shake, slowmo, best, fx: () => S.fx,
+  teleport: (x, z, fx, fz, y) => inXR() && XRM.teleport(x, z, fx, fz, y), // (fx, fz): punto al que quedas mirando · y: altura del piso donde quedas parado
   enter: (k, o) => enter(k, o), win: (k, st) => win(k, st), lose: m => lose(m), ready: () => ready()
 };
 let winStar = null, winT = 0;

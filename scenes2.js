@@ -59,6 +59,13 @@ function helmet(P, col) { // casco de fútbol americano con careta
   add(P.head, new THREE.SphereGeometry(r, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), M(col, { metalness: 0.4, roughness: 0.25 }), 0, 0.01, -0.005, false);
   for (const y of [-0.25, -0.45]) { const b = add(P.head, new THREE.TorusGeometry(r * 0.85, 0.004, 6, 16, Math.PI), M(0xdddddd, { metalness: 0.8 }), 0, y * r, r * 0.25, false); b.rotation.x = Math.PI / 2; b.rotation.z = Math.PI; }
 }
+// orilla sin parches: el mar pasa por debajo de la arena, pero sus olas nunca suben a la arena seca, y la arena mojada baja en rampa bajo el agua
+// SEA_Y: altura del mar (m) · AMP: tamaño de las olas (la cresta llega a SEA_Y + AMP × 0.58: debe quedar bajo 0) · DROP / RUN: cuánto baja la rampa y en qué largo (m)
+const SHORE = { SEA_Y: -0.4, AMP: 0.5, DROP: 1.2, RUN: 2.6 };
+function shoreRamp(g, cx, len, z) { // rampa de arena mojada: empieza en el borde de la arena seca (z) y baja hacia el mar (−z)
+  const r = add(g, new THREE.PlaneGeometry(len, Math.hypot(SHORE.DROP, SHORE.RUN)), M(0xb39a6c, { roughness: 0.35 }), cx, -SHORE.DROP / 2, z - SHORE.RUN / 2, false);
+  r.rotation.x = -Math.PI / 2 - Math.atan2(SHORE.DROP, SHORE.RUN); r.receiveShadow = true; return r;
+}
 
 /* ================= MIAMI — EXPLORACIÓN URBANA (5 objetos escondidos) ================= */
 const ITEM = {
@@ -74,8 +81,9 @@ function city(ctx, opt) {
   const restoreEnv = envFromSky(ctx, skyM);
   scene.fog = new THREE.Fog(0xd2ecff, 90, 360);
   lightRig(g, { sky: 0xcbe7ff, ground: 0xe8d3a0, hemi: 1.0, sun: 0xfff0d2, sunI: 2.8, dir: [-14, 24, -40], size: 26, target: [0, 0, 10] });
-  const ocean = waterMat(0x0b8db0);
-  const oc = add(g, new THREE.PlaneGeometry(400, 300, 100, 80), ocean, 0, -0.35, -165, false); oc.rotation.x = -Math.PI / 2;
+  const ocean = waterMat(0x0b8db0, { amp: SHORE.AMP });
+  const oc = add(g, new THREE.PlaneGeometry(400, 300, 100, 80), ocean, 0, SHORE.SEA_Y, -160, false); oc.rotation.x = -Math.PI / 2;
+  shoreRamp(g, 0, 400, -15);
   const sandT = rep(canvasTex(256, 256, (c, w, h) => { c.fillStyle = '#e8d2a2'; c.fillRect(0, 0, w, h); for (let i = 0; i < 9000; i++) { c.fillStyle = Math.random() < 0.5 ? 'rgba(170,140,90,.25)' : 'rgba(255,250,235,.35)'; c.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5); } }), 60, 6);
   const sand = add(g, new THREE.PlaneGeometry(400, 26), temp(new THREE.MeshStandardMaterial({ map: sandT, roughness: 1 })), 0, 0, -2, false); sand.rotation.x = -Math.PI / 2; sand.receiveShadow = true;
   add(g, box(400, 0.25, 3), M(0xf3c6c6, { roughness: 0.9 }), 0, 0.12, 10);
@@ -105,15 +113,56 @@ function city(ctx, opt) {
   const info = () => ctx.info(`⏱ ${Math.ceil(time)} s · ${found}/5 · ${items.map(i => i.userData.found ? '✅' : i.userData.emoji).join(' ')}`);
   const pickI = p => { const h = p.ray.intersectObjects(items.filter(i => !i.userData.found), true).find(o => o.object.material === hitM); return h ? h.object.parent : null; };
   const intro = withIntro(ctx, opt, [{ t: 0, p: [0, 22, -28], yaw: Math.PI, pitch: -0.32 }, { t: 3.5, p: [0, 1.6, 10], yaw: Math.PI, pitch: 0.05 }, { t: 6, p: [0, 1.6, 10], yaw: Math.PI * 2, pitch: 0 }], 0, 0);
-  const refreshHint = () => ctx.hint((ctx.gyroOn() ? '📱 Gira el celular para buscar · ' : '👆 Arrastra para mirar · ') + (ctx.isHand() ? 'deja tu índice quieto sobre el objeto' : 'toca el objeto') + ' · sigue la flecha amarilla');
+  const refreshHint = () => ctx.hint(opt.xr ? '☝️ Apunta con la mano a un objeto y junta los dedos · sigue los haces de luz y la flecha amarilla' : (ctx.gyroOn() ? '📱 Gira el celular para buscar · ' : '👆 Arrastra para mirar · ') + (ctx.isHand() ? 'deja tu índice quieto sobre el objeto' : 'toca el objeto') + ' · sigue la flecha amarilla');
+  function collect(it, inp) { // ¡encontrado!
+    it.userData.found = true; it.userData.fly = 0.001; found++; ctx.sfx('pickup'); ctx.burst(it.getWorldPosition(_v), [0xffd700, 0xff4fa3, 0x24d1ff], 45, 2.2); info();
+    if (opt.xr) { ctx.pop(`${it.userData.emoji} ¡LO TIENES!`, 'small'); ctx.xr().haptic(0.8, 70, inp); }
+    if (found === 5) { running = false; guideArrow(camera, null); xArrow.visible = false; setTimeout(() => ctx.win('city'), 700); }
+  }
+
+  // ===== 🥽 Quest: apunta con la mano a un objeto y junta los dedos: vuela hasta tu mano =====
+  // CURB: altura de la acera donde apareces (m) · PULL: segundos que tarda el objeto en llegar a tu mano
+  // ARROW: a qué distancia de tus ojos flota la flecha (m) · SEEN: ángulo (°) desde el centro de tu vista en que el objeto ya se ve y la flecha se esconde
+  const XC = { CURB: 0.245, PULL: 0.45, ARROW: 0.9, SEEN: 35 };
+  const _cw = new V3(), _ro = new V3(), _rd = new V3(), _rq = new THREE.Quaternion(), xRc = new THREE.Raycaster();
+  const camW = () => camera.getWorldPosition(_cw); // tu cabeza en el mundo (en el visor la cámara vive dentro de otro grupo)
+  const hits = items.map(i => i.children.find(o => o.material === hitM));
+  const xArrow = new THREE.Group(); xArrow.visible = false; g.add(xArrow); // flecha amarilla 3D frente a ti que señala el objeto más cercano
+  { const am = temp(new THREE.MeshBasicMaterial({ color: 0xffd23a, depthTest: false, transparent: true }));
+    const h = add(xArrow, cone(0.06, 0.14, 16), am, 0, 0, 0.07, false), s = add(xArrow, cyl(0.022, 0.022, 0.14, 10), am, 0, 0, -0.06, false);
+    h.rotation.x = s.rotation.x = Math.PI / 2; h.renderOrder = s.renderOrder = 60; }
+  function xrAim(inp) { // ¿a qué objeto apunta tu mano? → { it, d } (d = distancia en m)
+    if (!inp || !inp.src || !inp.ok) return null;
+    inp.ctl.getWorldPosition(_ro); _rd.set(0, 0, -1).applyQuaternion(inp.ctl.getWorldQuaternion(_rq)); xRc.set(_ro, _rd);
+    const h = xRc.intersectObjects(hits.filter(m => !m.parent.userData.found && !m.parent.userData.pull), false)[0];
+    return h ? { it: h.object.parent, d: h.distance } : null;
+  }
+  function xrHover() { for (const inp of ctx.xr().inputs) { const a = xrAim(inp); if (a) return a.it; } return null; }
+  function xrInput(type, inp) { // pinza (o gatillo) apuntando a un objeto: vuela hasta tu mano
+    if (!opt.xr || type !== 'selectstart' || !running) return;
+    const a = xrAim(inp); if (!a) return;
+    a.it.userData.pull = { t: 0, inp, from: a.it.position.clone() }; ctx.sfx('click'); ctx.xr().haptic(0.4, 30, inp);
+  }
+  function xrPull(it, dt) { // el objeto vuela hasta tu mano; al llegar, cuenta
+    const u = it.userData, P = u.pull; P.t += dt; const k = Math.min(1, P.t / XC.PULL), e = 1 - Math.pow(1 - k, 3);
+    it.position.lerpVectors(P.from, g.worldToLocal(_v.copy(P.inp.grabPos)), e); it.scale.setScalar(1.3 - e * 0.6); u.body.rotation.y += dt * 8;
+    if (k >= 1) { u.pull = null; collect(it, P.inp); }
+  }
+  function xrArrow(p) { // si el objeto más cercano no se ve, la flecha frente a ti lo señala
+    const h = camW(); _rd.set(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(_rq));
+    xArrow.visible = !!p && _ro.copy(p).sub(h).normalize().dot(_rd) < Math.cos(THREE.MathUtils.degToRad(XC.SEEN));
+    if (!xArrow.visible) return;
+    xArrow.position.copy(h).addScaledVector(_rd, XC.ARROW); xArrow.position.y -= 0.18; xArrow.lookAt(p);
+  }
+  if (opt.xr) ctx.teleport(0, 10, 0, 0, XC.CURB); // 🥽 apareces en la acera rosada de Ocean Drive, mirando la playa
+
   return {
-    look: true, camLock: !opt.quick, dwellTime: 0.5, refreshHint,
+    look: true, camLock: !opt.quick, dwellTime: 0.5, refreshHint, xrInput, xrRays: () => opt.xr && running,
+    xrRayLen: inp => { const a = running && xrAim(inp); return a ? a.d : 0; },
     start() { running = true; this.camLock = false; info(); refreshHint(); },
     tap(p) {
       if (intro.on) { intro.finish(); this.camLock = false; return; }
-      const it = running && pickI(p); if (!it) return;
-      it.userData.found = true; it.userData.fly = 0.001; found++; ctx.sfx('pickup'); ctx.burst(it.getWorldPosition(_v), [0xffd700, 0xff4fa3, 0x24d1ff], 45, 2.2); info();
-      if (found === 5) { running = false; guideArrow(camera, null); setTimeout(() => ctx.win('city'), 700); }
+      const it = running && pickI(p); if (it) collect(it);
     },
     hoverable: p => (running ? pickI(p) : null),
     hover(p) { hover = running ? pickI(p) : null; },
@@ -123,16 +172,18 @@ function city(ctx, opt) {
       cars.forEach(c => { c.position.x += c.userData.sp * dt; if (c.position.x > 75) c.position.x = -75; if (c.position.x < -75) c.position.x = 75; });
       palms.forEach(p => (p.userData.crown.rotation.z = Math.sin(t * 0.9 + p.userData.ph) * 0.05));
       towers.forEach((tw, i) => (tw.userData.flag.rotation.y = Math.sin(t * 4 + i) * 0.4));
+      if (opt.xr) hover = running ? xrHover() : null;
       for (const it of items) {
         const u = it.userData;
+        if (u.pull) { xrPull(it, dt); continue; }
         if (u.fly) { u.fly += dt; it.position.y += dt * 2.5; it.scale.setScalar(1 + u.fly * 2); if (u.fly > 0.5) it.visible = false; continue; }
         it.position.y = u.by + Math.sin(t * 2 + u.ph) * 0.08; if (u.spin) u.body.rotation.y += dt * 1.5; it.scale.setScalar(hover === it ? 1.3 : 1);
       }
       if (running) {
         time -= dt; infoT += dt; if (infoT > 0.25) { infoT = 0; info(); }
-        let best = null, bd = 1e9; for (const it of items) if (!it.userData.found) { const d = it.position.distanceToSquared(camera.position); if (d < bd) { bd = d; best = it.position; } }
-        guideArrow(camera, best);
-        if (time <= 0) { time = 0; running = false; guideArrow(camera, null); ctx.lose(`Se acabó el tiempo. Encontraste ${found} de 5 objetos. Sigue la flecha amarilla y los haces de luz.`); }
+        let best = null, bd = 1e9; for (const it of items) if (!it.userData.found && !it.userData.pull) { const d = it.position.distanceToSquared(camW()); if (d < bd) { bd = d; best = it.position; } }
+        if (opt.xr) xrArrow(best); else guideArrow(camera, best);
+        if (time <= 0) { time = 0; running = false; guideArrow(camera, null); xArrow.visible = false; ctx.lose(`Se acabó el tiempo. Encontraste ${found} de 5 objetos. Sigue la flecha amarilla y los haces de luz.`); }
       }
     },
     dispose() { running = false; restoreEnv(); guideArrow(camera, null); }
@@ -823,13 +874,14 @@ function waterTour(ctx, opt) {
   scene.fog = new THREE.Fog(0xd2ecff, 70, 240);
   const sun = lightRig(g, { sky: 0xcbe7ff, ground: 0xe8d3a0, hemi: 1.0, sun: 0xfff0d2, sunI: 2.8, dir: [-12, 24, -30], size: 28, target: [0, 0, -6] });
   const END = 900, LANES = [-19, -15.5, -12], SPEED = { boat: 11, jet: 12.5 };
-  const ocean = waterMat(0x0d9fbf, { amp: 0.8 });
-  const oc = add(g, new THREE.PlaneGeometry(1400, 400, 280, 80), ocean, 450, -0.35, -190, false); oc.rotation.x = -Math.PI / 2;
+  const ocean = waterMat(0x0d9fbf, { amp: SHORE.AMP });
+  const oc = add(g, new THREE.PlaneGeometry(1400, 400, 280, 80), ocean, 450, SHORE.SEA_Y, -190, false); oc.rotation.x = -Math.PI / 2;
   const sandT = rep(canvasTex(256, 256, (c, w, h) => { c.fillStyle = '#e8d2a2'; c.fillRect(0, 0, w, h); for (let i = 0; i < 9000; i++) { c.fillStyle = Math.random() < 0.5 ? 'rgba(170,140,90,.25)' : 'rgba(255,250,235,.35)'; c.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5); } }), 200, 4);
   const sand = add(g, new THREE.PlaneGeometry(1400, 18.5), temp(new THREE.MeshStandardMaterial({ map: sandT, roughness: 1 })), 450, 0, -0.25, false); sand.rotation.x = -Math.PI / 2; sand.receiveShadow = true;
-  const wet = add(g, new THREE.PlaneGeometry(1400, 4), M(0xb39a6c, { roughness: 0.35 }), 450, -0.25, -10.5, false); wet.rotation.x = -Math.PI / 2 + 0.1;
-  const foamM = temp(new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, roughness: 1, depthWrite: false }));
-  const foam = add(g, new THREE.PlaneGeometry(1400, 1.2), foamM, 450, 0.03, -9.4, false); foam.rotation.x = -Math.PI / 2;
+  const wet = shoreRamp(g, 450, 1400, -9.5); // el borde de la arena seca está en z = −9.5
+  const foamM = temp(new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const foam = add(g, new THREE.PlaneGeometry(1400, 1.2), foamM, 450, 0, -10, false); foam.rotation.x = wet.rotation.x; // la espuma va pegada a la rampa
+  const fS = SHORE.DROP / Math.hypot(SHORE.DROP, SHORE.RUN), fC = SHORE.RUN / Math.hypot(SHORE.DROP, SHORE.RUN);
   add(g, box(1400, 0.25, 3), M(0xf3c6c6, { roughness: 0.9 }), 450, 0.12, 10);
   add(g, box(1400, 0.06, 8), M(0x55565c, { roughness: 0.95 }), 450, 0.03, 15.5);
   add(g, box(1400, 0.25, 2.5), M(0xe9e0d6, { roughness: 0.9 }), 450, 0.12, 20.5);
@@ -849,7 +901,7 @@ function waterTour(ctx, opt) {
     for (let k = 0; k < 3; k++) { const h = rnd(45, 110), w = rnd(12, 18); add(C, box(w, h, w), M(pick([0x9fb8c8, 0xb8c8d4, 0x7f9aab, 0xd6dde2]), { metalness: 0.7, roughness: 0.12 }), c0 + rnd(0, 120), h / 2, rnd(75, 120), false); }
     if ((c0 / 120) % 2 === 0) { const px = c0 + rnd(30, 90); add(C, box(3, 0.3, 2.2), M(0x8a6a48, { roughness: 0.9 }), px, 0.5, -9.6); for (const s2 of [-1.3, 1.3]) add(C, cyl(0.15, 0.15, 2, 8), M(0x5a4030), px + s2, -0.3, -10.4); }
     for (let k = 0; k < 2; k++) { const t = addA(turtle(), '🐢', 1.8); t.scale.setScalar(1.5); t.position.set(c0 + rnd(10, 110), 0.02, rnd(-7, -3)); t.rotation.y = Math.PI; C.add(t); turtles.push(t); }
-    { const m = addA(manatee(), '🦭', 2.2); m.position.set(c0 + rnd(20, 100), -0.42, -10.2); m.rotation.y = Math.PI / 2; m.userData.ph = rnd(0, 6); C.add(m); manatees.push(m); }
+    { const m = addA(manatee(), '🦭', 2.2); m.position.set(c0 + rnd(20, 100), -0.43, -11.6); m.rotation.y = Math.PI / 2; m.userData.ph = rnd(0, 6); C.add(m); manatees.push(m); }
     for (let k = 0; k < 2; k++) { const d = addA(dolphin(), '🐬', 2.4); d.scale.setScalar(1.3); d.userData.x0 = c0 + rnd(10, 100); d.userData.z0 = k ? rnd(-31, -27) : rnd(-26, -23); d.userData.ph = rnd(0, 6); C.add(d); dolphins.push(d); }
     { const b = spawnGLB('Parrot.glb', C, mixers, { s: 0.014 }); addA(b, '🦜', 2.5); b.userData = { ...b.userData, cx: c0 + rnd(20, 100), r: rnd(5, 9), h: rnd(6, 10), sp: rnd(0.4, 0.7), ph: rnd(0, 6) }; birds.push(b); }
   }
@@ -894,6 +946,10 @@ function waterTour(ctx, opt) {
   }
   function go(k) {
     veh = k; VEH[k].g.visible = true; running = true; showLanes(); info(); refreshHint(); ctx.sfx('portal');
+    if (opt.xr) { // 🥽 te subes al vehículo (fundido corto) y aparecen los botones de carril a tu derecha
+      if (dock) dock.visible = false; ctx.xr().ride(x + VEH[k].cam, z, XW.FLOOR[k], true); lean0 = null;
+      xLeg = ctx.xr().legend([{ k: -1, label: '◀ Izquierda', c: '#24d1ff' }, { k: 1, label: '▶ Derecha', c: '#24d1ff' }], d => { if (canShoot()) setLane(lane + d); });
+    }
     const ac = ctx.audio && ctx.audio();
     if (ac) { const o = ac.createOscillator(), f = ac.createBiquadFilter(), gn = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = 60; f.type = 'lowpass'; f.frequency.value = 450; gn.gain.value = 0.03; o.connect(f).connect(gn).connect(ac.destination); o.start(); eng = { o, gn }; }
   }
@@ -906,17 +962,65 @@ function waterTour(ctx, opt) {
   }
   function photo(a) {
     const sp = a.children.find(o => o.material === hitM)?.userData.sp || a.userData.sp; if (!sp) return;
-    ctx.sfx('shutter'); const f = document.getElementById('fade'); f.classList.add('on'); setTimeout(() => f.classList.remove('on'), 90);
+    ctx.sfx('shutter');
+    if (opt.xr) ctx.xr().flash('white'); else { const f = document.getElementById('fade'); f.classList.add('on'); setTimeout(() => f.classList.remove('on'), 90); }
     if (photos.has(sp)) { ctx.toast('📸 Ya tienes esa foto', 1200); return; }
     photos.add(sp); stars += 2; info(); ctx.burst(a.getWorldPosition(_v), [0xffffff, 0xffd700], 30, 1.5); ctx.toast(`📸 ${FACT[sp]} (+2 ⭐)`, 4500);
   }
   const pickA = p => { const h = p.ray.intersectObjects(animals.filter(a => a.parent && a.parent.visible), true).find(o => o.object.material === hitM); return h ? h.object.parent : null; };
   const seat = new V3(), seatPos = () => { const V = VEH[veh || 'boat']; return seat.set(x + V.cam, V.eye + Math.sin(performance.now() / 600) * 0.06, z); };
-  const refreshHint = () => ctx.hint(running ? (ctx.isHand() ? '☝️ Mueve el índice a la izquierda, al centro o a la derecha para cambiar de carril' : '◀ ▶ o desliza para cambiar de carril') + ' · recoge ⭐ · esquiva las boyas · toca animales para fotos 📸' : '');
+  const refreshHint = () => ctx.hint(!running ? '' : opt.xr ? '↔️ Inclínate a un lado (o usa ◀ ▶ a tu derecha) para cambiar de carril · recoge ⭐ · esquiva las boyas · apunta a un animal y junta los dedos 📸'
+    : (ctx.isHand() ? '☝️ Mueve el índice a la izquierda, al centro o a la derecha para cambiar de carril' : '◀ ▶ o desliza para cambiar de carril') + ' · recoge ⭐ · esquiva las boyas · toca animales para fotos 📸');
+
+  // ===== 🥽 Quest: vas de pie en el vehículo; te inclinas para cambiar de carril; apuntas a un animal y juntas los dedos para la foto =====
+  // SPEED: velocidad en el visor (1 = la del celular) · LANE_K: rapidez del cambio de carril · ROCK: cuánto se mece el vehículo (1 = como en el celular)
+  // LEAN: cuánto inclinarte (m) para cambiar de carril (0 = apagado) · LEAN_BACK: cuánto volver al centro (m) para poder inclinarte otra vez · FLOOR: altura (m) del piso donde vas de pie
+  const XW = { SPEED: 0.8, LANE_K: 8, ROCK: 0.3, LEAN: 0.15, LEAN_BACK: 0.06, FLOOR: { boat: 0.57, jet: 0.4 } };
+  let xLeg = null, lean0 = null, leanOn = true, leanT = 0, stickOn = true;
+  const _ro = new V3(), _rd = new V3(), _rq = new THREE.Quaternion(), _ws = new V3(), xRc = new THREE.Raycaster();
+  const aHits = animals.map(a => a.children.find(o => o.material === hitM));
+  const dock = opt.xr ? add(g, box(2.2, 0.3, 2.2), M(0x8a6a48, { roughness: 0.9 }), VEH.boat.cam, -0.15, LANES[1]) : null; // muelle donde esperas antes de subir
+  const finder = new THREE.Group(); finder.visible = false; g.add(finder); // 📸 marco sobre el animal que apuntas
+  const finderM = temp(new THREE.MeshBasicMaterial({ color: 0xffd23a, depthTest: false, transparent: true }));
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) for (const [w, h, px, py] of [[0.35, 0.06, sx * 0.82, sy], [0.06, 0.35, sx, sy * 0.82]]) add(finder, new THREE.PlaneGeometry(w, h), finderM, px, py, 0, false).renderOrder = 60;
+  const canShoot = () => running && phase === 'drive';
+  function xrAimA(inp) { // ¿a qué animal apunta tu mano? → { a, h, d } (d = distancia en m)
+    if (!inp || !inp.src || !inp.ok) return null;
+    inp.ctl.getWorldPosition(_ro); _rd.set(0, 0, -1).applyQuaternion(inp.ctl.getWorldQuaternion(_rq)); xRc.set(_ro, _rd);
+    const hit = xRc.intersectObjects(aHits.filter(m => m.parent.parent && m.parent.parent.visible), false)[0];
+    return hit ? { a: hit.object.parent, h: hit.object, d: hit.distance } : null;
+  }
+  function xrFinder() { // el marco aparece sobre el animal que apuntas (amarillo = foto nueva, gris = ya la tienes)
+    let best = null; if (canShoot()) for (const inp of ctx.xr().inputs) { const r = xrAimA(inp); if (r && (!best || r.d < best.d)) best = r; }
+    finder.visible = !!best; if (!best) return;
+    best.h.getWorldPosition(finder.position); finder.scale.setScalar(best.h.geometry.parameters.radius * best.h.getWorldScale(_ws).x * 0.5); // la zona para apuntar es más grande que el animal
+    finder.lookAt(camera.getWorldPosition(_ro)); finderM.color.set(photos.has(best.h.userData.sp) ? 0x9aa3b8 : 0xffd23a);
+  }
+  function xrInput(type, inp) { // pinza (o gatillo) apuntando a un animal = foto
+    if (!opt.xr || type !== 'selectstart' || !canShoot()) return;
+    const r = xrAimA(inp); if (r) { photo(r.a); ctx.xr().haptic(0.6, 50, inp); }
+  }
+  function xrSteer(dt) { // inclinarte hacia un lado (o la palanca del control) cambia de carril · va DESPUÉS de mover el vehículo
+    camera.getWorldPosition(_ro); _rd.set(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(_rq)); _rd.y = 0;
+    if (_rd.lengthSq() > 1e-4) _ro.addScaledVector(_rd.normalize(), -0.09); // de los ojos al cuello: girar la cabeza para mirar la playa no cuenta como inclinarse
+    const s = _ro.z - z; if (lean0 === null) lean0 = s; // a tu derecha es +z
+    const d = s - lean0;
+    if (leanOn) { lean0 += (s - lean0) * Math.min(1, dt / 3); leanT = 0; } // si das un paso, tu centro se acomoda despacio
+    else if ((leanT += dt) > 4) { lean0 = s; leanOn = true; } // si te quedas inclinado mucho rato, esa pasa a ser tu postura
+    if (XW.LEAN && canShoot()) {
+      if (leanOn && Math.abs(d) > XW.LEAN) { leanOn = false; setLane(lane + Math.sign(d)); }
+      else if (!leanOn && Math.abs(d) < XW.LEAN_BACK) leanOn = true;
+    }
+    let ax = 0; for (const inp of ctx.xr().inputs) { const gp = inp.src && !inp.src.hand && inp.src.gamepad; if (gp && gp.axes.length > 2 && Math.abs(gp.axes[2]) > Math.abs(ax)) ax = gp.axes[2]; }
+    if (stickOn && Math.abs(ax) > 0.6 && canShoot()) { stickOn = false; setLane(lane + Math.sign(ax)); } else if (Math.abs(ax) < 0.3) stickOn = true;
+  }
+  if (opt.xr) ctx.teleport(VEH.boat.cam, LANES[1], 100, LANES[1]); // 🥽 esperas en el muelle, mirando hacia donde vas
+
   const intro = withIntro(ctx, opt, [{ t: 0, p: [-40, 26, -60], yaw: -2.4, pitch: -0.35 }, { t: 3.5, p: [-8, 6, -26], yaw: -1.9, pitch: -0.15 }, { t: 5, p: [0.6, 2.35, LANES[1]], yaw: -Math.PI / 2 - 0.25, pitch: -0.05 }], -Math.PI / 2 - 0.25, -0.05);
   let sx = 0, sy = 0;
   return {
-    camLock: !opt.quick, dwellTime: 0.45, refreshHint,
+    camLock: !opt.quick, dwellTime: 0.45, refreshHint, xrInput, xrRays: () => opt.xr && canShoot(),
+    xrRayLen: inp => { const r = canShoot() && xrAimA(inp); return r ? r.d : 0; },
     start() { this.camLock = false; pickVehicle(); },
     onDown(p) { if (intro.on) { intro.finish(); this.camLock = false; return; } sx = p.sx; sy = p.sy; },
     onMove(p) { if (p.src === 'hand' && running) setLane(p.ndc.x < -0.25 ? 0 : p.ndc.x > 0.25 ? 2 : 1); },
@@ -927,39 +1031,41 @@ function waterTour(ctx, opt) {
       mixers.forEach(m => m.update(dt)); ocean.userData.uT.value = t;
       if (intro.on) { intro.update(dt); if (!intro.on) this.camLock = false; }
       if (running && phase === 'drive') {
-        x += SPEED[veh] * dt; inv = Math.max(0, inv - dt);
+        x += SPEED[veh] * (opt.xr ? XW.SPEED : 1) * dt; inv = Math.max(0, inv - dt);
         if (stopI < 3 && x >= STOPS[stopI].x) { x = STOPS[stopI].x; ask(); }
         if (x >= END) { x = END; running = false; bar.classList.add('hidden'); if (eng) eng.gn.gain.value = 0.0001;
           for (let k = 0; k < 6; k++) setTimeout(() => ctx.burst(_v.set(END + rnd(-5, 15), rnd(8, 14), rnd(-25, -10)), [0xff4fa3, 0xffd23a, 0x24d1ff, 0xffffff], 60, 4), k * 250);
           ctx.sfx('crowd'); setTimeout(() => ctx.win('miami'), 1500); }
       }
-      z = lerp(z, LANES[lane], Math.min(1, dt * 6));
-      if (!intro.on) camera.position.copy(seatPos());
-      if (veh) { const G2 = VEH[veh].g; G2.position.set(x, -0.15 + Math.sin(t * 1.7) * 0.06, z); G2.rotation.set(Math.sin(t * 1.1) * 0.03, (LANES[lane] - z) * -0.06, Math.sin(t * 1.3) * 0.025);
+      z = lerp(z, LANES[lane], Math.min(1, dt * (opt.xr ? XW.LANE_K : 6)));
+      if (!intro.on && !opt.xr) camera.position.copy(seatPos());
+      if (veh) { const G2 = VEH[veh].g, rk = opt.xr ? XW.ROCK : 1; G2.position.set(x, -0.15 + Math.sin(t * 1.7) * 0.06 * rk, z); G2.rotation.set(Math.sin(t * 1.1) * 0.03 * rk, (LANES[lane] - z) * -0.06, Math.sin(t * 1.3) * 0.025 * rk);
+        if (opt.xr) { ctx.xr().ride(x + VEH[veh].cam, z, XW.FLOOR[veh]); xrSteer(dt); } // 🥽 el vehículo te lleva (tu vista no se mece)
         if (running && phase === 'drive' && Math.random() < 0.9) { const back = veh === 'jet' ? 1.6 : 3.3; ctx.burst(_w.set(x - back, 0.1, z + rnd(-0.5, 0.5)), [0xffffff, 0xd8f4ff], 2, 1.4, 4); } }
       for (const it of items) {
         if (!it.o.visible || Math.abs(it.x - x) > 60) continue;
         if (it.type === 'star') it.o.rotation.y += dt * 3; else it.o.position.y = -0.3 + Math.sin(t * 1.5 + it.ph) * 0.1;
         if (running && Math.abs(it.x - x) < 2 && Math.abs(LANES[it.L] - z) < 2.2) {
           if (it.type === 'star') { it.o.visible = false; stars++; ctx.sfx('pickup'); ctx.burst(it.o.position, [0xffd700, 0xffffff], 20, 1.6); info(); }
-          else if (!inv) { inv = 1.2; hearts--; ctx.sfx('hurt'); ctx.flash(); if (navigator.vibrate) navigator.vibrate(80); ctx.burst(it.o.position, [0xffffff, 0xbfefff], 30, 2.5, 5); info();
-            if (hearts <= 0) { running = false; bar.classList.add('hidden'); if (eng) eng.gn.gain.value = 0.0001; ctx.lose('Chocaste 3 veces con las boyas. Cambia de carril con ◀ ▶ (o deslizando) cuando veas una boya roja o verde adelante.'); } }
+          else if (!inv) { inv = 1.2; hearts--; ctx.sfx('hurt'); ctx.flash(); if (navigator.vibrate) navigator.vibrate(80); if (opt.xr) ctx.xr().haptic(1, 120); ctx.burst(it.o.position, [0xffffff, 0xbfefff], 30, 2.5, 5); info();
+            if (hearts <= 0) { running = false; bar.classList.add('hidden'); if (eng) eng.gn.gain.value = 0.0001; ctx.lose(opt.xr ? 'Chocaste 3 veces con las boyas. Cuando veas una boya roja o verde adelante, inclínate hacia un lado (o usa ◀ ▶) para cambiar de carril.' : 'Chocaste 3 veces con las boyas. Cambia de carril con ◀ ▶ (o deslizando) cuando veas una boya roja o verde adelante.'); } }
         }
       }
       chunks.forEach(C => (C.visible = Math.abs(C.userData.cx - x) < 200));
       skyM.position.x = x; sun.position.set(x - 12, 24, -36); sun.target.position.set(x + 10, 0, -6);
-      foam.position.z = -9.4 + Math.sin(t * 0.8) * 0.6; foamM.opacity = 0.45 + Math.sin(t * 0.8 + 1) * 0.3;
+      const fd = 1 + Math.sin(t * 0.8) * 0.35; foam.position.set(450, -fd * fS + 0.03, -9.5 - fd * fC); foamM.opacity = 0.45 + Math.sin(t * 0.8 + 1) * 0.3;
       waveT -= dt; if (waveT <= 0) { waveT = 3.2; ctx.sfx('waves'); }
       traffic.forEach(c => { c.position.x += c.userData.sp * dt; if (c.position.x < x - 80) c.position.x += 200; if (c.position.x > x + 120) c.position.x -= 200; });
       palms.forEach(p => { if (p.parent.visible) p.userData.crown.rotation.z = Math.sin(t * 0.9 + p.userData.ph) * 0.05; });
       towers.forEach((tw, i) => { if (tw.parent.visible) tw.userData.flag.rotation.y = Math.sin(t * 4 + i) * 0.4; });
       turtles.forEach(tt => { if (!tt.parent.visible) return; tt.position.z -= dt * 0.1; if (tt.position.z < -8) tt.position.z = -3; tt.userData.fl.forEach((f, k) => (f.rotation.y = Math.sin(t * 2 + k) * 0.4)); });
-      manatees.forEach(m => { m.position.x += dt * 0.6; m.position.y = -0.38 + Math.sin(t + m.userData.ph) * 0.06; });
+      manatees.forEach(m => { m.position.x += dt * 0.6; m.position.y = -0.43 + Math.sin(t + m.userData.ph) * 0.06; });
       dolphins.forEach(d => { if (!d.parent.visible) return; const u = d.userData, c = (t * 0.33 + u.ph) % 1; d.position.set(u.x0 + c * 12, -0.6 + Math.sin(c * Math.PI) * 2.4 - (c > 0.95 ? 2 : 0), u.z0); d.rotation.x = -Math.cos(c * Math.PI) * 0.9; d.rotation.y = Math.PI / 2; });
       birds.forEach(b => { const u = b.userData, a = t * u.sp + u.ph; b.position.set(u.cx + Math.cos(a) * u.r, u.h, 6 + Math.sin(a) * u.r); b.rotation.y = Math.atan2(-Math.sin(a), Math.cos(a)); });
       if (running) { infoT += dt; if (infoT > 0.5) { infoT = 0; info(); } }
+      if (opt.xr) xrFinder();
     },
-    dispose() { alive = false; running = false; restoreEnv(); bar.remove(); document.body.classList.remove('hasbar'); removeEventListener('keydown', kd); if (eng) { try { eng.o.stop(); } catch (e) {} } }
+    dispose() { alive = false; running = false; restoreEnv(); if (xLeg) xLeg.dispose(); bar.remove(); document.body.classList.remove('hasbar'); removeEventListener('keydown', kd); if (eng) { try { eng.o.stop(); } catch (e) {} } }
   };
 }
 

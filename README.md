@@ -25,6 +25,8 @@ Varitas, martillo, arco, escudo, lancha, moto acuática, tabla de surf, balones 
   Miami Heat en el visor: zonas de tiro `XZ` y barra de tiro, agarre, dribleo y clavada `XRB` en `scenes.js`.
   Patada con los pies (cámara de la PC): `KICKCAM` en `sensor.js`.
   Orlando en el visor (trazo en el aire, escudo con la palma, vitrina de varitas): `XO` en `scenes.js`. Isla de Héroes en el visor (escudo de la mano izquierda, golpe en la cabeza, lanzar el escudo): `XH` en `scenes2.js`.
+  Miami urbano en el visor (altura de la acera, rapidez con que el objeto vuela a tu mano, flecha): `XC` en `scenes2.js`. Tour acuático en el visor (velocidad, cuánto inclinarte para cambiar de carril, cuánto se mece el vehículo): `XW` en `scenes2.js`.
+- Orilla del mar en Miami urbano y el tour acuático (altura del mar, tamaño de las olas y rampa de arena mojada): `SHORE` en `scenes2.js`. La cresta de las olas (`SEA_Y + AMP × 0.58`) debe quedar bajo 0 para que el agua no atraviese la arena.
 
 ## 🥽 Modo Quest (Meta Quest 3S)
 
@@ -37,5 +39,6 @@ Varitas, martillo, arco, escudo, lancha, moto acuática, tabla de surf, balones 
 - **Orlando (mundo en VR):** toca la varita que quieras en la vitrina y aparece en tu mano derecha. Junta índice y pulgar y dibuja en el aire la figura de la runa (zigzag = rayo, línea = desarme, círculo = escudo); al soltar los dedos sale el hechizo. Tu palma abierta hacia el mago también hace escudo. A tu derecha está la leyenda: toca un hechizo para ver cómo se dibuja.
 - **Isla de Héroes (mundo en VR):** toca el poder que quieras (rayo, flecha o escudo). Apunta con la mano derecha al dron del aro rojo y junta los dedos para atacar (el escudo también se lanza con el gesto). Tu mano izquierda lleva un escudo de energía: ponlo frente a las bolas rojas, o esquívalas moviéndote.
 - En los mundos tu cuarto no se ve, así que tus manos aparecen como puntos de luz.
-- Miami urbano y el tour acuático dicen «Próximamente en Quest».
+- **Miami urbano (mundo en VR):** apareces en la acera de Ocean Drive mirando la playa. Gira para buscar los 5 objetos (uno está detrás de ti); si el más cercano no está a la vista, una flecha amarilla frente a ti lo señala. Apunta con la mano a un objeto y junta los dedos: vuela hasta tu mano.
+- **Tour acuático (mundo en VR):** esperas en un muelle; al elegir lancha o moto de agua quedas de pie en ella y avanza sola (la playa a tu derecha). Para cambiar de carril inclina el cuerpo a un lado; también sirven los botones ◀ ▶ de tu derecha o la palanca del control. Para fotografiar un animal, apúntalo (aparece un marco 📸) y junta los dedos. En el visor va al 80 % de la velocidad del celular y tu vista no se mece, para marear menos.
 - Para probar en el computador sin visor: el emulador de Meta, Immersive Web Emulator (extensión de Chrome).

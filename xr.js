@@ -21,14 +21,17 @@ export const HANDKICK = { MIN: 1.2, REACH: 0.08, POWER: 0.1, LIFT: 0.6, AIM: 1.2
 // Ventana al estadio en realidad mixta: ancho y alto (m) y a qué distancia de ti
 export const WINDOW = { W: 3.2, H: 2.5, D: 1.8 };
 
-// Juegos que ya se pueden elegir en el visor (los demás dicen «Próximamente en Quest») y cómo se juegan con las manos
+// Juegos del visor (ya están los 7) y cómo se juegan con las manos
 const SPORTS = {
+  city: { c: '#ff4fa3', how: 'Estás en Ocean Drive, Miami Beach. Encuentra 5 objetos en 60 segundos: 🔑 🕶️ 🏄 📷 🪙. Gira para mirar a tu alrededor (¡también detrás de ti!) y sigue los haces de luz y la flecha amarilla. Apunta con la mano a un objeto y junta los dedos: vuela hasta tu mano.' },
+  miami: { c: '#24d1ff', how: 'Viajas de pie en una lancha (o moto de agua) por la costa de Miami Beach; la playa queda a tu derecha. Para cambiar de carril inclina el cuerpo a la izquierda o a la derecha (o usa los botones ◀ ▶ de tu derecha o la palanca del control). Recoge estrellas ⭐, esquiva las boyas 🔴🟢 y fotografía los animales: apúntalos con la mano y junta los dedos 📸. Si te mareas, cierra los ojos un momento o quítate el visor.' },
   heat: { c: '#ff8a00', full: 'Cancha completa', how: 'Toca el balón con la palma para agarrarlo. Empújalo hacia el piso para driblar: vuelve a tu mano. Para tirar, súbelo sobre tu cabeza y lánzalo cuando la barra esté en VERDE. Tiras desde la bandeja, el doble, el triple y al final puedes hacer una CLAVADA. Mete 5 canastas.' },
   fg: { c: '#3ddc84', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia los postes: más fuerte llega más lejos y hacia un lado apuntas a ese lado. Ojo: los jugadores cambian los postes de lado.' },
   orlando: { c: '#9b5cff', how: 'Elige tu varita tocándola. Para lanzar un hechizo junta el índice y el pulgar y dibuja en el aire con la varita la figura de la runa del mago: zigzag = rayo ⚡, línea = desarme ➖ y círculo = escudo ⭕. Al soltar los dedos sale el hechizo. Tu palma abierta hacia el mago también hace escudo.' },
   heroes: { c: '#ff6a1a', how: 'Elige tu poder tocándolo. Apunta con la mano derecha al dron del aro rojo y junta los dedos (pinza) para atacar. Tu mano izquierda lleva un escudo de energía: ponlo frente a las bolas rojas para bloquearlas. ¡También puedes esquivarlas moviéndote!' },
   penalty: { c: '#24d1ff', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia el arco: si golpeas hacia arriba va alto y hacia un lado apuntas a esa esquina. La esquina dorada vale doble.' }
 };
+const WORLDS = ['orlando', 'heroes', 'city', 'miami']; // fila de mundos en realidad virtual del menú (en este orden)
 
 /* ================= Estilo «arcade tropical» (los mismos colores de CSS/style.css) ================= */
 const C = { ink: '#1a0b2e', violet: '#2a0e4a', pink: '#ff4fa3', orange: '#ff8a00', sun: '#ffd54a', sea: '#24d1ff', ok: '#3ddc84', bad: '#ff4d5e', text2: '#c9d1ff' };
@@ -146,20 +149,16 @@ export function initXR(api) {
       g.fillText(`${sn}/7`, W - 50, 104); g.font = `40px ${EMO}`; g.fillText('⭐', W - 50 - g.measureText(`${sn}/7`).width - 64, 108);
       g.font = `600 22px ${UIF}`; g.fillStyle = C.text2; g.fillText('☝️ Toca con el dedo  ·  🤏 o apunta y junta los dedos', W - 46, 148);
       g.textAlign = 'left'; g.font = `700 24px ${UIF}`;
-      g.fillText('DEPORTES · REALIDAD MIXTA', 46, 192); g.fillText('MUNDOS · REALIDAD VIRTUAL', 46, 480); g.fillText('PRÓXIMAMENTE', 678, 480);
+      g.fillText('DEPORTES · REALIDAD MIXTA', 46, 192); g.fillText('MUNDOS · REALIDAD VIRTUAL', 46, 480);
     }, 1), menu, 0, 0, 0));
     const at = (x, y, w, h) => [x / PX + w / PX / 2 - MW / 2, MH / 2 - y / PX - h / PX / 2];
     ['heat', 'fg', 'penalty'].forEach((k, i) => { // fichas grandes de los deportes
       const [x, y] = at(46 + i * 352, 208, 324, 234);
       place(button(0.324, 0.234, drawSport(k), () => openSport(k)), menu, x, y, 0.004);
     });
-    ['orlando', 'heroes'].forEach((k, i) => { // mundos en realidad virtual
-      const [x, y] = at(46 + i * 316, 496, 300, 112);
-      place(button(0.3, 0.112, drawWorld(k), () => openSport(k)), menu, x, y, 0.004);
-    });
-    ORDER.filter(([k]) => !SPORTS[k]).forEach(([k, icon], i) => { // fichas pequeñas: próximamente
-      const [x, y] = at(678 + i * 206, 496, 190, 112);
-      place(button(0.19, 0.112, drawSoon(k, icon), () => toast(`🛠️ ${GAMES[k].short}: próximamente en Quest`, 2200)), menu, x, y, 0.004);
+    WORLDS.forEach((k, i) => { // los 4 mundos en realidad virtual, en una fila
+      const [x, y] = at(46 + i * 261, 496, 245, 112);
+      place(button(0.245, 0.112, drawWorld(k), () => openSport(k)), menu, x, y, 0.004);
     });
     let [x, y] = at(46, 630, 290, 84);
     place(button(0.29, 0.084, drawBtn('🚪 Salir del Quest', 'danger', 28), end), menu, x, y, 0.004);
@@ -181,30 +180,18 @@ export function initXR(api) {
       g.font = `600 22px ${UIF}`; g.fillStyle = got ? C.sun : C.text2; g.fillText(got ? '⭐ ¡Estrella conseguida!' : 'Toca para jugar', W / 2, 202);
     };
   }
-  function drawSoon(k, icon) {
-    const G = GAMES[k];
-    return (g, W, H, st) => {
-      const hov = st === 'hover';
-      rr(g, 5, 5, W - 10, H - 10, 18); g.fillStyle = st === 'press' ? 'rgba(10,12,32,.95)' : 'rgba(20,26,61,.9)'; g.fill();
-      g.lineWidth = 3; g.strokeStyle = hov ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.16)'; g.stroke();
-      g.globalAlpha = 0.72; g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `34px ${EMO}`; g.fillText(icon, 38, 38);
-      g.globalAlpha = 1; rr(g, W - 100, 24, 84, 28, 14); g.fillStyle = 'rgba(255,213,74,.16)'; g.fill();
-      g.fillStyle = C.sun; g.font = `10px ${PXF}`; g.fillText('PRONTO', W - 58, 39);
-      g.globalAlpha = 0.85; g.fillStyle = '#fff'; fit(g, G.short, 700, 24, UIF, W - 24); g.fillText(G.short, W / 2, 82); g.globalAlpha = 1;
-    };
-  }
-  function drawWorld(k) { // ficha de mundo (Orlando, Héroes): horizontal, con su color
+  function drawWorld(k) { // ficha de mundo (Orlando, Héroes, Miami urbano, Tour acuático): horizontal, con su color
     const G = GAMES[k], icon = (ORDER.find(([q]) => q === k) || [])[1], acc = SPORTS[k].c;
     return (g, W, H, st) => {
       const hov = st === 'hover', got = !!api.stars[k];
       rr(g, 5, 5, W - 10, H - 10, 20); g.fillStyle = st === 'press' ? '#120724' : C.ink; g.fill();
-      g.save(); g.clip(); const rg = g.createRadialGradient(56, H / 2, 6, 56, H / 2, 120); rg.addColorStop(0, acc); rg.addColorStop(1, 'rgba(26,11,46,0)');
+      g.save(); g.clip(); const rg = g.createRadialGradient(42, H / 2, 6, 42, H / 2, 110); rg.addColorStop(0, acc); rg.addColorStop(1, 'rgba(26,11,46,0)');
       g.globalAlpha = hov ? 0.8 : 0.5; g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
       rr(g, 5, 5, W - 10, H - 10, 20); g.lineWidth = hov ? 7 : 4; g.strokeStyle = hov ? C.sun : acc;
       if (hov) { g.shadowColor = C.sun; g.shadowBlur = 14; } g.stroke(); g.shadowBlur = 0;
-      g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `52px ${EMO}`; g.fillText(icon, 56, H / 2 + 2);
-      g.textAlign = 'left'; g.fillStyle = '#fff'; fit(g, G.short, 800, 28, UIF, W - 120); g.fillText(G.short, 104, 44);
-      g.font = `600 20px ${UIF}`; g.fillStyle = got ? C.sun : C.text2; g.fillText(got ? '⭐ ¡Conseguida!' : 'Toca para jugar', 104, 78);
+      g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `42px ${EMO}`; g.fillText(icon, 42, H / 2 + 2);
+      g.textAlign = 'left'; g.fillStyle = '#fff'; fit(g, G.short, 800, 26, UIF, W - 92); g.fillText(G.short, 78, 44);
+      g.font = `600 18px ${UIF}`; g.fillStyle = got ? C.sun : C.text2; g.fillText(got ? '⭐ ¡Conseguida!' : 'Toca para jugar', 78, 78);
     };
   }
   function showMenu() { // el menú aparece frente a ti (al entrar al visor y al volver de un juego)
@@ -357,6 +344,7 @@ export function initXR(api) {
   }
   function sceneInput(type, inp) { const sc = api.current(); if (sc && sc.xrInput) sc.xrInput(type, inp); } // el juego recibe la pinza / gatillo / agarre
   const sceneRays = () => { const sc = api.current(); return !!(sc && sc.xrRays && sc.xrRays()); };
+  const sceneRayLen = inp => { const sc = api.current(); return (sc && sc.xrRayLen && sc.xrRayLen(inp)) || 0; }; // distancia (m) a lo que apunta tu mano en el juego, o 0
   function press(b, inp) { b.flash = 0.14; api.sfx('click'); haptic(0.5, 30, inp); queueMicrotask(() => b.onPress()); }
   const uiActive = () => !!cardG || (state === 'menu' && menu.visible) || (state === 'game' && bar.visible);
   const _l = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
@@ -398,8 +386,9 @@ export function initXR(api) {
     rc.set(_o, _d); const h = rc.intersectObjects(meshes, false)[0];
     const aim = state === 'game' && !cardG && sceneRays(); // algunos juegos muestran el rayo para apuntar (elegir varita, apuntar a un dron)
     if (!h && state === 'game' && !cardG && !aim) { inp.hover = null; return; } // jugando, el rayo solo aparece al apuntar a un botón
-    inp.ray.position.copy(_o); inp.ray.quaternion.copy(_q); inp.ray.scale.set(1, 1, h ? h.distance : aim ? 1.5 : 0.5);
-    inp.ray.material.opacity = h ? 0.9 : 0.35; inp.ray.visible = true;
+    const far = aim && !h ? sceneRayLen(inp) : 0; // si apuntas a algo del juego (un objeto, un animal), el rayo llega hasta él
+    inp.ray.position.copy(_o); inp.ray.quaternion.copy(_q); inp.ray.scale.set(1, 1, h ? h.distance : far || (aim ? 1.5 : 0.5));
+    inp.ray.material.opacity = h || far ? 0.9 : 0.35; inp.ray.visible = true;
     if (h) { inp.ring.position.copy(h.point); h.object.getWorldQuaternion(inp.ring.quaternion); inp.ring.translateZ(0.003); inp.ring.scale.setScalar(1); inp.ring.material.opacity = 1; inp.ring.visible = true; }
     const s = h && h.object.userData.surf; inp.hover = s && s.onPress ? s : null;
   }
@@ -428,31 +417,44 @@ export function initXR(api) {
   // El grupo de la cámara (rig) se gira y se mueve para que el juego quede frente a ti: «al frente» del juego es hacia donde miras al entrar.
   // Tu cuarto real no se mueve: al cambiar de posición en el juego, el estadio se mueve a tu alrededor (con un fundido corto).
   const _e = new THREE.Euler(), _b = new THREE.Vector3(), _hv = new THREE.Vector3();
-  let spot = { x: 0, z: 0, yaw: 0 }, eye = 1.6, world = null, kickBall = null, kickSeen = 0; // yaw: hacia dónde es «al frente» (0 = −Z del juego)
+  let spot = { x: 0, z: 0, yaw: 0, y: 0 }, eye = 1.6, world = null, kickBall = null, kickSeen = 0; // yaw: hacia dónde es «al frente» (0 = −Z del juego) · y: altura del piso donde estás parado (acera, cubierta de la lancha)
   const poseP = new THREE.Vector3(0, 1.6, 0), poseQ = new THREE.Quaternion(); // tu cabeza según el visor (se guarda justo después de dibujar)
   function afterRender() { poseP.copy(camera.position); poseQ.copy(camera.quaternion); }
   function placeRig() { // pone tu cabeza (en x, z) justo sobre el punto del juego «spot»
     _hv.copy(poseP).applyQuaternion(rig.quaternion);
-    rig.position.set(spot.x - _hv.x, 0, spot.z - _hv.z); rig.updateMatrixWorld(true);
+    rig.position.set(spot.x - _hv.x, spot.y, spot.z - _hv.z); rig.updateMatrixWorld(true);
     for (const inp of inputs) { inp.pg.t = inp.pp.t = 0; inp.pg.v.set(0, 0, 0); inp.pp.v.set(0, 0, 0); } // el salto no cuenta como movimiento de la mano
     placeGameUi();
   }
   function recenter() { // al entrar a un juego: hacia donde miras pasa a ser «al frente» del juego
     closeCard(); state = 'game'; menu.visible = false;
     rig.rotation.set(0, -_e.setFromQuaternion(poseQ, 'YXZ').y, 0); rig.updateMatrixWorld(true);
-    spot = { x: 0, z: 0, yaw: 0 }; eye = THREE.MathUtils.clamp(poseP.y, 1.0, 2.0); placeRig();
+    spot = { x: 0, z: 0, yaw: 0, y: 0 }; eye = THREE.MathUtils.clamp(poseP.y, 1.0, 2.0); placeRig();
   }
   // el juego te lleva a otro punto (otro penal, otra distancia, otra zona de tiro); con (fx, fz) además te deja mirando hacia ese punto
-  function teleport(x, z, fx, fz) {
+  // y: altura del piso donde quedas parado (0 = el suelo del juego; por ejemplo, la acera de Ocean Drive)
+  function teleport(x, z, fx, fz, y = 0) {
     if (!session || state !== 'game') return;
     const yaw = fx === undefined ? spot.yaw : Math.atan2(-(fx - x), -(fz - z));
-    if (Math.hypot(x - spot.x, z - spot.z) < 0.05 && Math.abs(yaw - spot.yaw) < 0.01) return;
+    if (Math.hypot(x - spot.x, z - spot.z) < 0.05 && Math.abs(yaw - spot.yaw) < 0.01 && Math.abs(y - spot.y) < 0.01) return;
     if (yaw !== spot.yaw) { rig.rotation.set(0, yaw - _e.setFromQuaternion(poseQ, 'YXZ').y, 0); rig.updateMatrixWorld(true); }
-    spot = { x, z, yaw }; fadeM.material.opacity = 1; fadeGoal = 0; placeRig();
+    spot = { x, z, yaw, y }; fadeM.material.opacity = 1; fadeGoal = 0; placeRig();
   }
-  const gamePoint = (dx, y, dz, out = new THREE.Vector3()) => { // punto del juego relativo a tu posición (dx a tu derecha, dz hacia atrás)
+  // el juego te lleva en un vehículo (tour acuático): te mueve junto con él sin fundido ni recentrar tu cabeza, y tus textos viajan contigo
+  // blink: un fundido corto (para subirte a la lancha)
+  const _rd = new THREE.Vector3();
+  function ride(x, z, y = spot.y, blink = false) {
+    if (!session || state !== 'game') return;
+    _rd.set(x - spot.x, y - spot.y, z - spot.z); if (_rd.lengthSq() < 1e-10) return;
+    spot.x = x; spot.y = y; spot.z = z; rig.position.add(_rd); rig.updateMatrixWorld(true);
+    for (const o of [hud, cardG, ...pops.map(p => p.mesh)]) if (o) o.position.add(_rd);
+    for (const p of pops) p.y0 += _rd.y;
+    if (blink) { fadeM.material.opacity = 1; fadeGoal = 0; }
+    placeGameUi();
+  }
+  const gamePoint = (dx, y, dz, out = new THREE.Vector3()) => { // punto del juego relativo a tu posición (dx a tu derecha, y sobre tu piso, dz hacia atrás)
     const c = Math.cos(spot.yaw), s = Math.sin(spot.yaw);
-    return out.set(spot.x + dx * c + dz * s, y, spot.z - dx * s + dz * c);
+    return out.set(spot.x + dx * c + dz * s, y + spot.y, spot.z - dx * s + dz * c);
   };
 
   // botonera a tu izquierda: volver al menú y cambiar entre «ventana» y estadio completo
@@ -495,7 +497,7 @@ export function initXR(api) {
   }
   function dropLegend() { if (!legendG) return; for (const m of [...legendG.children]) if (m.userData.surf) drop(m.userData.surf); legendG.removeFromParent(); legendG = null; }
   function floorPlace(o) { // el balón de la patada flota frente a tu cintura (o queda en tu piso si pateas con los pies)
-    if (feet.on) { gamePoint(0, 0.13, -FEET.BALL_D, _b); tee.position.set(_b.x, 0.006, _b.z); }
+    if (feet.on) { gamePoint(0, 0.13, -FEET.BALL_D, _b); tee.position.set(_b.x, spot.y + 0.006, _b.z); }
     else { gamePoint(0, eye - HANDKICK.TEE_DROP, -HANDKICK.TEE_D, _b); tee.position.set(_b.x, _b.y - 0.14, _b.z); }
     o.position.copy(o.parent ? o.parent.worldToLocal(_b) : _b);
     o.visible = true; kickBall = o; kickSeen = 0.15;
@@ -723,7 +725,7 @@ export function initXR(api) {
     where: name => { // centro (en el mundo) de un botón del menú o de la tarjeta: 'heat', 'fg', 'penalty', 'orlando'…, 'salir', 'sonido' o 'card0'
       const btns = gr => gr.children.filter(m => m.userData.surf && m.userData.surf.onPress);
       const ms = name.startsWith('card') ? (cardG ? btns(cardG) : []) : name.startsWith('bar') ? btns(bar) : btns(menu);
-      const idx = /^(card|bar)\d$/.test(name) ? +name.slice(-1) : ['heat', 'fg', 'penalty', 'orlando', 'heroes', ...ORDER.filter(([k]) => !SPORTS[k]).map(([k]) => k), 'salir', 'sonido'].indexOf(name);
+      const idx = /^(card|bar)\d$/.test(name) ? +name.slice(-1) : ['heat', 'fg', 'penalty', ...WORLDS, 'salir', 'sonido'].indexOf(name);
       const m = ms[idx]; if (!m) return null;
       const p = m.getWorldPosition(new THREE.Vector3()), n = new THREE.Vector3(0, 0, 1).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion()));
       return { p: p.toArray(), n: n.toArray() };
@@ -736,5 +738,5 @@ export function initXR(api) {
     ray: i => { inputs[i].ctl.getWorldPosition(_o); inputs[i].ctl.getWorldQuaternion(_q); return { o: _o.toArray(), d: _d.set(0, 0, -1).applyQuaternion(_q).toArray() }; }
   };
   return {
-    on: () => !!session, isAR: () => xmode === 'immersive-ar', start, end, showMenu, afterRender, legend, recenter, teleport, gamePoint, eye: () => eye, floorPlace, gameStart, gameEnd, ready, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
+    on: () => !!session, isAR: () => xmode === 'immersive-ar', start, end, showMenu, afterRender, legend, recenter, teleport, ride, gamePoint, eye: () => eye, floorPlace, gameStart, gameEnd, ready, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
 }
