@@ -260,7 +260,7 @@ function heroes(ctx, opt) {
       const n = WAVES[i], offs = n === 1 ? [0] : [-0.28, 0.28];
       for (let k = 0; k < n; k++) launch(drones[killed + k], offs[k], i);
       ctx.pop(`OLEADA ${i + 1}`, 'small'); ctx.sfx('charge');
-      ctx.toast(i === 0 ? '🚨 ¡Dron a la vista! Atácalo. Si te dispara, mantén 🛡️ CUBRIRSE.' : `🚨 ¡Oleada ${i + 1}: ${n} drones!`, 2600);
+      ctx.toast(i === 0 ? (opt.xr ? '🚨 ¡Dron a la vista! Apúntalo y junta los dedos. Bloquea sus bolas con tu escudo.' : '🚨 ¡Dron a la vista! Atácalo. Si te dispara, mantén 🛡️ CUBRIRSE.') : `🚨 ¡Oleada ${i + 1}: ${n} drones!`, 2600);
     } else { // jefe final
       bossOn = true; launch(boss, 0, 9); ctx.pop('¡JEFE FINAL!', 'fire'); ctx.sfx('buzzer'); ctx.shake(0.4);
       ctx.toast('👾 ¡El JEFE! Dispara ráfagas y a media vida se cubre con una burbuja.', 3200);
@@ -276,6 +276,57 @@ function heroes(ctx, opt) {
   let wi = -1, held = null, running = false, cd = 0, kick = 0, draw = 0, drawing = false, holdCover = false, coverT = 0, warnT = 0, attackBtn = null, coverBtn = null;
   const covering = () => holdCover || coverT > 0;
   const bolts = [], arrows = [], sh = { state: 'held', obj: null, tgt: null };
+  // ===== 🥽 Quest: elige tu poder tocándolo, apunta con la mano derecha y bloquea con el escudo de tu mano izquierda =====
+  // SHIELD_R: tamaño del escudo de energía de tu mano izquierda (m) · HEAD_R: a qué distancia de tu cabeza te golpea una bola (m)
+  // TOUCH: qué tan cerca debe estar tu mano de un poder para elegirlo (m) · THROW_V: rapidez de la mano para lanzar el escudo con el gesto (m/s)
+  const XH = { SHIELD_R: 0.28, HEAD_R: 0.35, TOUCH: 0.12, THROW_V: 2.5 };
+  const _cp = new V3(), _hq = new THREE.Quaternion(), _hd = new V3(), _ho = new V3();
+  const camP = () => camera.getWorldPosition(_cp); // tu cabeza en el mundo (en el visor la cámara vive dentro de otro grupo)
+  const xIn = side => ctx.xr().inputs.find(i => i.src && i.ok && i.src.handedness === side) || null;
+  let xLeg = null;
+  const lShield = new THREE.Group(); lShield.visible = false; g.add(lShield); // escudo de energía de tu mano izquierda
+  add(lShield, new THREE.CircleGeometry(XH.SHIELD_R, 40), temp(new THREE.MeshBasicMaterial({ color: 0x24d1ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })), 0, 0, 0, false);
+  add(lShield, new THREE.RingGeometry(XH.SHIELD_R - 0.02, XH.SHIELD_R, 40), temp(new THREE.MeshBasicMaterial({ color: 0xaee8ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })), 0, 0, 0, false);
+  if (opt.xr) { camera.remove(shelf); g.add(shelf); shelf.scale.setScalar(2); camera.remove(hand); g.add(hand); hand.scale.setScalar(0.8); } // ya no van pegados a la cámara
+  function xrPickStart() { // la vitrina de poderes flota frente a ti y además hay botones a tu derecha
+    ctx.xr().gamePoint(0, ctx.xr().eye() - 0.3, -0.6, shelf.position); shelf.lookAt(camP());
+    xLeg = ctx.xr().legend(WEAPONS.map((w, i) => ({ k: i, label: `${ICON[i]} ${w.name}`, c: '#' + new THREE.Color(w.col).getHexString() })), i => { if (wi < 0) choose(i); });
+  }
+  function xrPickW(inp, rayToo) { // ¿qué poder toca tu mano (o apunta tu rayo)?
+    for (const h of picks) { h.getWorldPosition(_ho); if (inp.palmPos.distanceTo(_ho) < XH.TOUCH || (inp.src.hand && inp.tip.distanceTo(_ho) < XH.TOUCH)) return picks.indexOf(h); }
+    if (!rayToo) return null;
+    inp.ctl.getWorldPosition(_ho); _hd.set(0, 0, -1).applyQuaternion(inp.ctl.getWorldQuaternion(_hq));
+    const hit = new THREE.Raycaster(_ho, _hd).intersectObjects(picks, true)[0]; if (!hit) return null;
+    for (let o = hit.object; o; o = o.parent) { const i = picks.indexOf(o); if (i >= 0) return i; }
+    return null;
+  }
+  function xrInput(type, inp) {
+    if (!opt.xr || type !== 'selectstart' || !inp.ok) return;
+    if (wi < 0) { const i = xrPickW(inp, true); if (i !== null) choose(i); return; }
+    if (running) fire(); // pinza (o gatillo) = atacar al dron que apuntas con la mano derecha
+  }
+  function xrHands(tg) {
+    if (wi < 0) { for (const inp of ctx.xr().inputs) if (inp.src && inp.ok) { const i = xrPickW(inp, false); if (i !== null) { choose(i); break; } } } // tocar un poder lo elige
+    const R = xIn('right'), L = xIn('left');
+    hand.visible = !!R && wi >= 0;
+    if (R) {
+      R.ctl.getWorldPosition(_ho); _hd.set(0, 0, -1).applyQuaternion(R.ctl.getWorldQuaternion(_hq));
+      hand.position.copy(R.palmPos); hand.lookAt(tg ? tg.position : _ho.addScaledVector(_hd, 20)); hand.rotateX(Math.PI / 2 - kick * 0.6);
+      const v = R.pp.v, s = v.length(); // escudo: también se lanza con el gesto (mano rápida hacia el dron)
+      if (running && wi === 2 && sh.state === 'held' && tg && s > XH.THROW_V && v.dot(_hd.copy(tg.position).sub(R.palmPos).normalize()) > s * 0.6) fire();
+    }
+    lShield.visible = !!L && running;
+    if (L) { lShield.position.copy(L.palmPos).addScaledVector(L.palmN, 0.06); lShield.lookAt(_ho.copy(lShield.position).add(L.palmN)); }
+  }
+  function xrBall(b) { // la bola choca con tu escudo; si te pasa cerca sin tocarte, ¡la esquivaste!
+    if (lShield.visible && b.position.distanceTo(lShield.position) < XH.SHIELD_R + 0.1) {
+      b.visible = false; ctx.sfx('block'); ctx.burst(b.position, [0x24d1ff, 0xffffff], 30, 1.8); ctx.pop('¡BLOQUEADO!', 'small'); ctx.xr().haptic(0.8, 60); return true;
+    }
+    const d = b.position.distanceTo(camP());
+    if (d < 1.3 && d > XH.HEAD_R) b.userData.close = true;
+    else if (b.userData.close && d >= 1.3 && b.userData.v.dot(_ho.copy(b.position).sub(_cp)) > 0) { b.userData.close = false; if (running) ctx.pop('¡ESQUIVADA!', 'small'); }
+    return false;
+  }
   const info = () => ctx.info(wi < 0 ? '🦸 Elige tu arma' : bossOn
     ? `👾 JEFE ${'▰'.repeat(Math.max(0, boss.userData.hp))}${'▱'.repeat(HZ.bossHp - Math.max(0, boss.userData.hp))} · ${'❤️'.repeat(hearts)}${'🖤'.repeat(HZ.hearts - hearts)}`
     : `🌊 Oleada ${Math.max(1, wave + 1)}/3 · ${'❤️'.repeat(hearts)}${'🖤'.repeat(HZ.hearts - hearts)} · Drones ${killed}/5${combo >= 2 ? ` · 🔥 x${combo}` : ''}`);
@@ -285,7 +336,7 @@ function heroes(ctx, opt) {
     bar.classList.remove('hidden'); shelf.visible = true; document.body.classList.add('hasbar');
   }
   function choose(i) {
-    wi = i; shelf.visible = false; held = weaponModel(i); holdPose(held, i); hand.add(held); if (i === 2) sh.obj = held;
+    wi = i; shelf.visible = false; if (xLeg) { xLeg.dispose(); xLeg = null; } held = weaponModel(i); holdPose(held, i); hand.add(held); if (i === 2) sh.obj = held;
     bar.innerHTML = `<button class="attack">${VERB[i]}</button><button class="cover">🛡️ CUBRIRSE</button>`;
     attackBtn = bar.querySelector('.attack'); coverBtn = bar.querySelector('.cover');
     attackBtn.onclick = () => fire();
@@ -293,9 +344,11 @@ function heroes(ctx, opt) {
     coverBtn.addEventListener('pointerdown', on); ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => coverBtn.addEventListener(n, off));
     running = true; time = 0; ctx.sfx('pickup'); refreshHint(); startWave(0);
   }
-  function target() { // el dron más cercano al centro de la pantalla
-    const f = _w.set(0, 0, -1).applyQuaternion(camera.quaternion); let best = null, bd = -2;
-    for (const d of alive()) { if (d.userData.t0 < 0.7) continue; const c = _v.copy(d.position).sub(camera.position).normalize().dot(f); if (c > bd) { bd = c; best = d; } }
+  function target() { // el dron más cercano al centro de la pantalla (en el visor: hacia donde apunta tu mano derecha)
+    const R = opt.xr && xIn('right'); let o = camP(), f;
+    if (R) { o = R.ctl.getWorldPosition(_ho); f = _hd.set(0, 0, -1).applyQuaternion(R.ctl.getWorldQuaternion(_hq)); } else f = _w.set(0, 0, -1).applyQuaternion(camera.getWorldQuaternion(_hq));
+    let best = null, bd = -2;
+    for (const d of alive()) { if (d.userData.t0 < 0.7) continue; const c = _v.copy(d.position).sub(o).normalize().dot(f); if (c > bd) { bd = c; best = d; } }
     return best;
   }
   function hitDrone(d) {
@@ -342,16 +395,16 @@ function heroes(ctx, opt) {
   function enemyShot(d) { // el dron dispara una bola roja hacia ti
     const b = balls.find(x => !x.visible); if (!b) return;
     b.visible = true; b.position.copy(d.position);
-    b.userData.v.copy(camera.position).add(_v.set(rnd(-0.25, 0.25), -0.15, 0)).sub(d.position).normalize().multiplyScalar(HZ.shotSp * (bossOn ? 1.2 : 1));
+    b.userData.close = false; b.userData.v.copy(camP()).add(_v.set(rnd(-0.25, 0.25), -0.15, 0)).sub(d.position).normalize().multiplyScalar(HZ.shotSp * (bossOn ? 1.2 : 1));
     ctx.sfx('throw');
   }
   const intro = withIntro(ctx, opt, [{ t: 0, p: [0, 1.6, 26], yaw: 0, pitch: 0.2 }, { t: 3.5, p: [0, 1.6, 4], yaw: 0, pitch: 0.12 }, { t: 7.5, p: [0, 1.6, 0], yaw: Math.PI * 2, pitch: 0.1 }], 0, 0.1);
-  const refreshHint = () => ctx.hint(wi < 0 ? 'Elige tu arma con los botones de abajo 👇'
+  const refreshHint = () => ctx.hint(opt.xr ? (wi < 0 ? '✋ Toca el poder que quieras (o elígelo en los botones de tu derecha)' : '☝️ Apunta con tu mano derecha al dron del aro rojo y junta los dedos · 🛡️ pon el escudo de tu mano izquierda frente a las bolas rojas') : wi < 0 ? 'Elige tu arma con los botones de abajo 👇'
     : `Pulsa <b>${VERB[wi]}</b> ` + (ctx.isHand() ? 'o haz pinza' : 'o toca un dron') + ' para atacar (el <b>aro rojo</b> marca a cuál). Cuando venga una bola roja (el botón parpadea), mantén <b>🛡️ CUBRIRSE</b>' + (ctx.isHand() ? ' o muestra la palma ✋.' : '.'));
   const pickD = p => { let best = null, bd = 4; for (const d of alive()) { if (d.userData.t0 < 0.7) continue; const r = p.ray.ray.distanceSqToPoint(d.position) / (d.userData.boss ? 6 : 1); if (r < bd) { bd = r; best = d; } } return best; };
   return {
-    camLock: !opt.quick, dwellTime: 0.45, refreshHint, _dbg: { incoming: () => balls.some(b => b.visible) },
-    start() { this.camLock = false; info(); refreshHint(); showPick(); },
+    camLock: !opt.quick, dwellTime: 0.45, refreshHint, xrInput, xrRays: () => opt.xr && (wi < 0 || running), _dbg: { incoming: () => balls.some(b => b.visible) },
+    start() { this.camLock = false; info(); refreshHint(); showPick(); if (opt.xr) xrPickStart(); },
     onDown(p) { if (intro.on) { intro.finish(); this.camLock = false; return; } if (running) fire(p.src === 'hand' ? null : pickD(p)); },
     onMove() {}, onUp() {},
     palm() { if (running) { coverT = 1.3; ctx.sfx('block'); } }, // con la mano: palma abierta = cubrirte un momento
@@ -368,10 +421,13 @@ function heroes(ctx, opt) {
       field.visible = covering(); if (field.visible) { fHex.rotation.z += dt * 1.5; field.scale.setScalar(1 + Math.sin(t * 18) * 0.02); }
       if (coverBtn) { coverBtn.classList.toggle('on', covering()); coverBtn.classList.toggle('warn', warnT > 0 && !covering()); attackBtn.disabled = covering(); }
       warnT = 0;
-      const n = ctx.ptr.ndc, hh = 0.5 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hw = hh * camera.aspect;
-      hand.position.set(0.55 * hw, -0.6 * hh, -0.5);
       const tg = running ? target() : null;
-      hand.lookAt(tg ? tg.position : ctx.ptr.ray.ray.at(20, _w)); hand.rotateX(Math.PI / 2 - kick * 0.6 + (covering() ? 0.6 : 0));
+      if (opt.xr) xrHands(tg); // 🥽 el arma en tu mano derecha y el escudo en la izquierda
+      else {
+        const n = ctx.ptr.ndc, hh = 0.5 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hw = hh * camera.aspect;
+        hand.position.set(0.55 * hw, -0.6 * hh, -0.5);
+        hand.lookAt(tg ? tg.position : ctx.ptr.ray.ray.at(20, _w)); hand.rotateX(Math.PI / 2 - kick * 0.6 + (covering() ? 0.6 : 0));
+      }
       if (held && wi === 1) { draw = drawing ? Math.min(1, draw + dt * 3) : Math.max(0, draw - dt * 8); const s = held.getObjectByName('cuerda'); if (s) { const a = s.geometry.attributes.position; a.setZ(1, s.userData.z0 + s.userData.dir * draw * 0.22); a.needsUpdate = true; } }
       if (held && wi === 0 && Math.random() < 0.3) ctx.burst(held.getWorldPosition(_v), 0x7fd8ff, 1, 0.5);
       if (running && waveT > 0) { waveT -= dt; if (waveT <= 0) startWave(wave + 1); }
@@ -389,7 +445,7 @@ function heroes(ctx, opt) {
         ang = baseYaw + u.off * A + ang * A;
         dr.position.set(Math.sin(ang) * dist, y, -Math.cos(ang) * dist);
         const full = u.boss ? 3 : 1.4; u.wob = Math.max(0, (u.wob || 0) - dt * 2); dr.rotation.z = Math.sin(t * 30) * 0.3 * u.wob;
-        dr.lookAt(camera.position);
+        dr.lookAt(camP());
         // disparo: el ojo brilla y crece (aviso) y luego sale la bola roja
         let s = Math.min(full, u.t0 * 2 * full / 1.4);
         if (running && u.t0 > 0.8) {
@@ -410,16 +466,17 @@ function heroes(ctx, opt) {
       for (const b of balls) {
         if (!b.visible) continue;
         b.position.addScaledVector(b.userData.v, dt); warnT = 1;
-        if (b.position.distanceTo(camera.position) < 1.0) {
+        if (opt.xr && xrBall(b)) continue;
+        if (b.position.distanceTo(camP()) < (opt.xr ? XH.HEAD_R : 1.0)) {
           b.visible = false;
           if (!running) continue;
           if (covering()) { ctx.sfx('block'); ctx.burst(b.position, [0x24d1ff, 0xffffff], 30, 1.8); ctx.pop('¡BLOQUEADO!', 'small'); }
           else {
             hearts--; combo = 0; ctx.sfx('hurt'); ctx.flash(); ctx.shake(0.5); info();
-            if (hearts <= 0) { running = false; bar.classList.add('hidden'); ctx.lose('Los drones te alcanzaron 3 veces. Consejo: cuando venga la bola roja (el botón parpadea), mantén 🛡️ CUBRIRSE hasta que choque.'); }
+            if (hearts <= 0) { running = false; bar.classList.add('hidden'); ctx.lose(opt.xr ? 'Los drones te alcanzaron 3 veces. Consejo: pon el escudo de tu mano izquierda frente a la bola roja, o muévete para esquivarla.' : 'Los drones te alcanzaron 3 veces. Consejo: cuando venga la bola roja (el botón parpadea), mantén 🛡️ CUBRIRSE hasta que choque.'); }
             else ctx.pop('¡AUCH!', 'bad');
           }
-        } else if (b.position.distanceTo(camera.position) > 40) b.visible = false;
+        } else if (b.position.distanceTo(camP()) > 40) b.visible = false;
       }
       for (let i = bolts.length - 1; i >= 0; i--) { const b = bolts[i]; b.life -= dt; b.ln.material.opacity = b.life * 4; if (b.life <= 0) { g.remove(b.ln); disposeTree(b.ln); bolts.splice(i, 1); } }
       for (let i = arrows.length - 1; i >= 0; i--) {
@@ -438,7 +495,7 @@ function heroes(ctx, opt) {
       }
       guideArrow(camera, tg && running ? tg.position : null);
     },
-    dispose() { running = false; restoreEnv(); guideArrow(camera, null); bar.remove(); document.body.classList.remove('hasbar'); camera.remove(shelf); camera.remove(hand); camera.remove(field); disposeTree(shelf); disposeTree(hand); disposeTree(field); }
+    dispose() { running = false; restoreEnv(); if (xLeg) xLeg.dispose(); guideArrow(camera, null); bar.remove(); document.body.classList.remove('hasbar'); camera.remove(shelf); camera.remove(hand); camera.remove(field); disposeTree(shelf); disposeTree(hand); disposeTree(field); }
   };
 }
 
@@ -926,13 +983,13 @@ export const GAMES2 = {
     fact: 'Miami Beach tiene una de las mayores concentraciones de arquitectura Art Déco del mundo. Su distrito histórico entró al Registro Nacional de Lugares Históricos de EE. UU. en 1979.'
   },
   fg: {
-    short: 'Fútbol americano', title: '🏈 Field Goal Challenge', pix: 'GOL DE CAMPO', tag: 'FÚTBOL AMERICANO · 3 GOLES', countdown: true, winMsg: '¡Eres el pateador estrella!', create: fg, foot: true,
+    short: 'Touchdown NFL', title: '🏈 Touchdown NFL', pix: 'TOUCHDOWN NFL', tag: 'FÚTBOL AMERICANO · 3 GOLES', countdown: true, winMsg: '¡Eres el pateador estrella!', create: fg, foot: true,
     icon() { const i = new THREE.Group(); const b = fbBall(); b.scale.setScalar(1); i.add(b); return i; },
     how: h => 'Eres el pateador. Patea el balón para que pase <b>entre los postes amarillos y por encima del travesaño</b>. <b>¡Ojo!</b> En cada ronda unos jugadores <b>empujan los postes</b> a la izquierda o a la derecha: espera a que paren y patea hacia su lado. Cada gol te aleja más (20, 30 y 40 yardas). <b>Consigue 3 goles de campo.</b> Patea con tu pie (el celular apuntando a tus zapatos) ' + (h ? 'o mueve tu <b>índice rápido hacia arriba</b>.' : 'o desliza el dedo.'),
     fact: 'Florida tiene tres equipos de la NFL: los Miami Dolphins, los Tampa Bay Buccaneers y los Jacksonville Jaguars.'
   },
   penalty: {
-    short: 'Penales', title: '⚽ Penalty Challenge', pix: 'PENALES', tag: 'FÚTBOL · 5 TIROS', countdown: true, winMsg: '¡Ganaste la tanda de penales!', create: penalty, foot: true,
+    short: 'Penales MLS', title: '⚽ Penales MLS', pix: 'PENALES MLS', tag: 'FÚTBOL · 5 TIROS', countdown: true, winMsg: '¡Ganaste la tanda de penales!', create: penalty, foot: true,
     icon() { const i = new THREE.Group(); i.add(modelo('balon-futbol', { fallback: () => new THREE.Mesh(sph(0.11, 24), soccerBallMat()), onLoad: o => o.scale.setScalar(0.11) })); return i; },
     how: h => 'Tienes <b>5 penales</b> y el portero cambia: <b>🐢 lento</b>, <b>🎲 adivinador</b> (se inclina hacia el lado que eligió) y <b>🐆 felino</b>. Una esquina del arco brilla: <b>el gol ahí vale doble (x2)</b>. <b>Marca al menos 3 goles.</b> Patea con tu pie (el celular apuntando a tus zapatos) ' + (h ?'o mueve tu <b>índice rápido hacia arriba</b> (inclinado a un lado para apuntar).' : 'o desliza el dedo (la inclinación apunta, la velocidad es la fuerza).'),
     fact: 'El Inter Miami CF juega en la MLS desde 2020.'

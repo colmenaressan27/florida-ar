@@ -23,8 +23,10 @@ export const WINDOW = { W: 3.2, H: 2.5, D: 1.8 };
 
 // Juegos que ya se pueden elegir en el visor (los demás dicen «Próximamente en Quest») y cómo se juegan con las manos
 const SPORTS = {
-  heat: { c: '#ff8a00', full: 'Cancha completa', how: 'Acércate al balón y junta los dedos (pinza) para agarrarlo. Lánzalo hacia el aro con el brazo y suelta los dedos. Para driblar, suéltalo hacia tu piso y vuelve a agarrarlo. Mete 5 canastas.' },
+  heat: { c: '#ff8a00', full: 'Cancha completa', how: 'Toca el balón con la palma para agarrarlo. Empújalo hacia el piso para driblar: vuelve a tu mano. Para tirar, súbelo sobre tu cabeza y lánzalo cuando la barra esté en VERDE. Tiras desde la bandeja, el doble, el triple y al final puedes hacer una CLAVADA. Mete 5 canastas.' },
   fg: { c: '#3ddc84', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia los postes: más fuerte llega más lejos y hacia un lado apuntas a ese lado. Ojo: los jugadores cambian los postes de lado.' },
+  orlando: { c: '#9b5cff', how: 'Elige tu varita tocándola. Para lanzar un hechizo junta el índice y el pulgar y dibuja en el aire con la varita la figura de la runa del mago: zigzag = rayo ⚡, línea = desarme ➖ y círculo = escudo ⭕. Al soltar los dedos sale el hechizo. Tu palma abierta hacia el mago también hace escudo.' },
+  heroes: { c: '#ff6a1a', how: 'Elige tu poder tocándolo. Apunta con la mano derecha al dron del aro rojo y junta los dedos (pinza) para atacar. Tu mano izquierda lleva un escudo de energía: ponlo frente a las bolas rojas para bloquearlas. ¡También puedes esquivarlas moviéndote!' },
   penalty: { c: '#24d1ff', full: 'Estadio completo', how: 'El estadio se abre como una ventana. Golpea el balón con la palma hacia el arco: si golpeas hacia arriba va alto y hacia un lado apuntas a esa esquina. La esquina dorada vale doble.' }
 };
 
@@ -144,16 +146,20 @@ export function initXR(api) {
       g.fillText(`${sn}/7`, W - 50, 104); g.font = `40px ${EMO}`; g.fillText('⭐', W - 50 - g.measureText(`${sn}/7`).width - 64, 108);
       g.font = `600 22px ${UIF}`; g.fillStyle = C.text2; g.fillText('☝️ Toca con el dedo  ·  🤏 o apunta y junta los dedos', W - 46, 148);
       g.textAlign = 'left'; g.font = `700 24px ${UIF}`;
-      g.fillText('DEPORTES · REALIDAD MIXTA', 46, 192); g.fillText('PRÓXIMAMENTE EN QUEST', 46, 480);
+      g.fillText('DEPORTES · REALIDAD MIXTA', 46, 192); g.fillText('MUNDOS · REALIDAD VIRTUAL', 46, 480); g.fillText('PRÓXIMAMENTE', 678, 480);
     }, 1), menu, 0, 0, 0));
     const at = (x, y, w, h) => [x / PX + w / PX / 2 - MW / 2, MH / 2 - y / PX - h / PX / 2];
     ['heat', 'fg', 'penalty'].forEach((k, i) => { // fichas grandes de los deportes
       const [x, y] = at(46 + i * 352, 208, 324, 234);
       place(button(0.324, 0.234, drawSport(k), () => openSport(k)), menu, x, y, 0.004);
     });
+    ['orlando', 'heroes'].forEach((k, i) => { // mundos en realidad virtual
+      const [x, y] = at(46 + i * 316, 496, 300, 112);
+      place(button(0.3, 0.112, drawWorld(k), () => openSport(k)), menu, x, y, 0.004);
+    });
     ORDER.filter(([k]) => !SPORTS[k]).forEach(([k, icon], i) => { // fichas pequeñas: próximamente
-      const [x, y] = at(46 + i * 260, 496, 244, 112);
-      place(button(0.244, 0.112, drawSoon(k, icon), () => toast(`🛠️ ${GAMES[k].short}: próximamente en Quest`, 2200)), menu, x, y, 0.004);
+      const [x, y] = at(678 + i * 206, 496, 190, 112);
+      place(button(0.19, 0.112, drawSoon(k, icon), () => toast(`🛠️ ${GAMES[k].short}: próximamente en Quest`, 2200)), menu, x, y, 0.004);
     });
     let [x, y] = at(46, 630, 290, 84);
     place(button(0.29, 0.084, drawBtn('🚪 Salir del Quest', 'danger', 28), end), menu, x, y, 0.004);
@@ -181,10 +187,24 @@ export function initXR(api) {
       const hov = st === 'hover';
       rr(g, 5, 5, W - 10, H - 10, 18); g.fillStyle = st === 'press' ? 'rgba(10,12,32,.95)' : 'rgba(20,26,61,.9)'; g.fill();
       g.lineWidth = 3; g.strokeStyle = hov ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.16)'; g.stroke();
-      g.globalAlpha = 0.72; g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `44px ${EMO}`; g.fillText(icon, 50, H / 2 + 2);
-      g.textAlign = 'left'; g.fillStyle = '#fff'; fit(g, G.short, 700, 24, UIF, W - 104); g.fillText(G.short, 90, 40);
-      g.globalAlpha = 1; rr(g, 90, 62, 104, 28, 14); g.fillStyle = 'rgba(255,213,74,.16)'; g.fill();
-      g.fillStyle = C.sun; g.font = `11px ${PXF}`; g.textAlign = 'center'; g.fillText('PRONTO', 142, 77);
+      g.globalAlpha = 0.72; g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `34px ${EMO}`; g.fillText(icon, 38, 38);
+      g.globalAlpha = 1; rr(g, W - 100, 24, 84, 28, 14); g.fillStyle = 'rgba(255,213,74,.16)'; g.fill();
+      g.fillStyle = C.sun; g.font = `10px ${PXF}`; g.fillText('PRONTO', W - 58, 39);
+      g.globalAlpha = 0.85; g.fillStyle = '#fff'; fit(g, G.short, 700, 24, UIF, W - 24); g.fillText(G.short, W / 2, 82); g.globalAlpha = 1;
+    };
+  }
+  function drawWorld(k) { // ficha de mundo (Orlando, Héroes): horizontal, con su color
+    const G = GAMES[k], icon = (ORDER.find(([q]) => q === k) || [])[1], acc = SPORTS[k].c;
+    return (g, W, H, st) => {
+      const hov = st === 'hover', got = !!api.stars[k];
+      rr(g, 5, 5, W - 10, H - 10, 20); g.fillStyle = st === 'press' ? '#120724' : C.ink; g.fill();
+      g.save(); g.clip(); const rg = g.createRadialGradient(56, H / 2, 6, 56, H / 2, 120); rg.addColorStop(0, acc); rg.addColorStop(1, 'rgba(26,11,46,0)');
+      g.globalAlpha = hov ? 0.8 : 0.5; g.fillStyle = rg; g.fillRect(0, 0, W, H); g.restore();
+      rr(g, 5, 5, W - 10, H - 10, 20); g.lineWidth = hov ? 7 : 4; g.strokeStyle = hov ? C.sun : acc;
+      if (hov) { g.shadowColor = C.sun; g.shadowBlur = 14; } g.stroke(); g.shadowBlur = 0;
+      g.textBaseline = 'middle'; g.textAlign = 'center'; g.font = `52px ${EMO}`; g.fillText(icon, 56, H / 2 + 2);
+      g.textAlign = 'left'; g.fillStyle = '#fff'; fit(g, G.short, 800, 28, UIF, W - 120); g.fillText(G.short, 104, 44);
+      g.font = `600 20px ${UIF}`; g.fillStyle = got ? C.sun : C.text2; g.fillText(got ? '⭐ ¡Conseguida!' : 'Toca para jugar', 104, 78);
     };
   }
   function showMenu() { // el menú aparece frente a ti (al entrar al visor y al volver de un juego)
@@ -286,6 +306,7 @@ export function initXR(api) {
   const inputs = [0, 1].map(i => {
     const inp = {
       i, ctl: renderer.xr.getController(i), hand: renderer.xr.getHand(i), src: null, hover: null, pressBtn: null, armed: null, near: null, tip: new THREE.Vector3(),
+      palmN: new THREE.Vector3(0, -1, 0), // hacia dónde mira tu palma (o el frente del control)
       grabPos: new THREE.Vector3(), palmPos: new THREE.Vector3(), grabPrev: new THREE.Vector3(), palmPrev: new THREE.Vector3(), ok: false, // dónde agarras (entre pulgar e índice) y dónde está tu palma, en el mundo
       pg: { p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0 }, pp: { p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0 }, // sus velocidades (m/s)
       ray: new THREE.Mesh(rayGeo, mat(0xffffff, { alphaMap: rayTex, transparent: true, depthWrite: false })),
@@ -311,7 +332,7 @@ export function initXR(api) {
     inp.ctl.addEventListener('squeezeend', () => { if (session) sceneInput('squeezeend', inp); });
     return inp;
   });
-  const _v1 = new THREE.Vector3();
+  const _v1 = new THREE.Vector3(), _pq = new THREE.Quaternion();
   function track(st, p, now) { // velocidad suavizada de un punto de la mano (sin crear objetos en cada cuadro)
     if (st.t) { const dt = Math.max(now - st.t, 1e-3); _v1.copy(p).sub(st.p).divideScalar(dt); st.v.lerp(_v1, 1 - Math.exp(-dt / 0.035)); }
     st.p.copy(p); st.t = now;
@@ -324,10 +345,18 @@ export function initXR(api) {
       inp.ok = !!pm; if (!pm) return;
       pm.getWorldPosition(inp.palmPos);
       if (th && ix) inp.grabPos.copy(th.getWorldPosition(_v1)).add(ix.getWorldPosition(_l)).multiplyScalar(0.5); else inp.grabPos.copy(inp.palmPos);
-    } else { inp.ctl.getWorldPosition(inp.palmPos); inp.grabPos.copy(inp.palmPos); inp.ok = true; }
+      const i0 = joint(inp, 'index-finger-metacarpal'), k0 = joint(inp, 'pinky-finger-metacarpal'), wr = joint(inp, 'wrist');
+      if (i0 && k0 && wr) { // normal de la palma: (meñique − índice) × (nudillos − muñeca); en la mano derecha va al revés
+        k0.getWorldPosition(_v1).sub(i0.getWorldPosition(_l)); wr.getWorldPosition(_l); _l.subVectors(inp.palmPos, _l);
+        inp.palmN.crossVectors(_v1, _l).normalize(); if (inp.src.handedness === 'right') inp.palmN.negate();
+      }
+      const mt = joint(inp, 'middle-finger-tip'); // mano abierta: la punta del dedo medio lejos de la muñeca
+      inp.open = !!(mt && wr) && mt.getWorldPosition(_v1).distanceTo(wr.getWorldPosition(_l)) > 0.15;
+    } else { inp.ctl.getWorldPosition(inp.palmPos); inp.grabPos.copy(inp.palmPos); inp.palmN.set(0, 0, -1).applyQuaternion(inp.ctl.getWorldQuaternion(_pq)); inp.ok = true; inp.open = false; }
     const now = performance.now() / 1000; track(inp.pg, inp.grabPos, now); track(inp.pp, inp.palmPos, now);
   }
-  function sceneInput(type, inp) { const sc = api.current(); if (sc && sc.xrInput) sc.xrInput(type, inp); } // para los juegos (siguiente entrega)
+  function sceneInput(type, inp) { const sc = api.current(); if (sc && sc.xrInput) sc.xrInput(type, inp); } // el juego recibe la pinza / gatillo / agarre
+  const sceneRays = () => { const sc = api.current(); return !!(sc && sc.xrRays && sc.xrRays()); };
   function press(b, inp) { b.flash = 0.14; api.sfx('click'); haptic(0.5, 30, inp); queueMicrotask(() => b.onPress()); }
   const uiActive = () => !!cardG || (state === 'menu' && menu.visible) || (state === 'game' && bar.visible);
   const _l = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
@@ -347,7 +376,7 @@ export function initXR(api) {
     if (!inp.src) { inp.hover = null; inp.ok = false; return; }
     handPoints(inp);
     const isHand = !!inp.src.hand, j = isHand && inp.hand.joints && inp.hand.joints['index-finger-tip'];
-    if (isHand && xmode === 'immersive-vr') drawJoints(inp); // en VR no ves tus manos reales: se dibujan con puntos
+    if (isHand && (xmode === 'immersive-vr' || (state === 'game' && (!world || world.full)))) drawJoints(inp); // si el mundo tapa tu cuarto, no ves tus manos reales: se dibujan con puntos de luz
     if (j && j.visible) {
       j.getWorldPosition(inp.tip); inp.dot.position.copy(inp.tip); inp.dot.visible = uiActive();
       const nb = uiActive() ? nearest(inp.tip, list) : null;
@@ -367,8 +396,9 @@ export function initXR(api) {
     // de lejos: rayo desde la mano o el control; la pinza (o el gatillo) es el clic
     inp.ctl.getWorldPosition(_o); inp.ctl.getWorldQuaternion(_q); _d.set(0, 0, -1).applyQuaternion(_q);
     rc.set(_o, _d); const h = rc.intersectObjects(meshes, false)[0];
-    if (!h && state === 'game' && !cardG) { inp.hover = null; return; } // jugando, el rayo solo aparece al apuntar a un botón
-    inp.ray.position.copy(_o); inp.ray.quaternion.copy(_q); inp.ray.scale.set(1, 1, h ? h.distance : 0.5);
+    const aim = state === 'game' && !cardG && sceneRays(); // algunos juegos muestran el rayo para apuntar (elegir varita, apuntar a un dron)
+    if (!h && state === 'game' && !cardG && !aim) { inp.hover = null; return; } // jugando, el rayo solo aparece al apuntar a un botón
+    inp.ray.position.copy(_o); inp.ray.quaternion.copy(_q); inp.ray.scale.set(1, 1, h ? h.distance : aim ? 1.5 : 0.5);
     inp.ray.material.opacity = h ? 0.9 : 0.35; inp.ray.visible = true;
     if (h) { inp.ring.position.copy(h.point); h.object.getWorldQuaternion(inp.ring.quaternion); inp.ring.translateZ(0.003); inp.ring.scale.setScalar(1); inp.ring.material.opacity = 1; inp.ring.visible = true; }
     const s = h && h.object.userData.surf; inp.hover = s && s.onPress ? s : null;
@@ -398,7 +428,7 @@ export function initXR(api) {
   // El grupo de la cámara (rig) se gira y se mueve para que el juego quede frente a ti: «al frente» del juego es hacia donde miras al entrar.
   // Tu cuarto real no se mueve: al cambiar de posición en el juego, el estadio se mueve a tu alrededor (con un fundido corto).
   const _e = new THREE.Euler(), _b = new THREE.Vector3(), _hv = new THREE.Vector3();
-  let spot = { x: 0, z: 0 }, eye = 1.6, world = null, kickBall = null, kickSeen = 0;
+  let spot = { x: 0, z: 0, yaw: 0 }, eye = 1.6, world = null, kickBall = null, kickSeen = 0; // yaw: hacia dónde es «al frente» (0 = −Z del juego)
   const poseP = new THREE.Vector3(0, 1.6, 0), poseQ = new THREE.Quaternion(); // tu cabeza según el visor (se guarda justo después de dibujar)
   function afterRender() { poseP.copy(camera.position); poseQ.copy(camera.quaternion); }
   function placeRig() { // pone tu cabeza (en x, z) justo sobre el punto del juego «spot»
@@ -410,13 +440,20 @@ export function initXR(api) {
   function recenter() { // al entrar a un juego: hacia donde miras pasa a ser «al frente» del juego
     closeCard(); state = 'game'; menu.visible = false;
     rig.rotation.set(0, -_e.setFromQuaternion(poseQ, 'YXZ').y, 0); rig.updateMatrixWorld(true);
-    spot = { x: 0, z: 0 }; eye = THREE.MathUtils.clamp(poseP.y, 1.0, 2.0); placeRig();
+    spot = { x: 0, z: 0, yaw: 0 }; eye = THREE.MathUtils.clamp(poseP.y, 1.0, 2.0); placeRig();
   }
-  function teleport(x, z) { // el juego te lleva a otro punto (otro penal, otra distancia, otra posición de tiro)
-    if (!session || state !== 'game' || Math.hypot(x - spot.x, z - spot.z) < 0.05) return;
-    spot = { x, z }; fadeM.material.opacity = 1; fadeGoal = 0; placeRig();
+  // el juego te lleva a otro punto (otro penal, otra distancia, otra zona de tiro); con (fx, fz) además te deja mirando hacia ese punto
+  function teleport(x, z, fx, fz) {
+    if (!session || state !== 'game') return;
+    const yaw = fx === undefined ? spot.yaw : Math.atan2(-(fx - x), -(fz - z));
+    if (Math.hypot(x - spot.x, z - spot.z) < 0.05 && Math.abs(yaw - spot.yaw) < 0.01) return;
+    if (yaw !== spot.yaw) { rig.rotation.set(0, yaw - _e.setFromQuaternion(poseQ, 'YXZ').y, 0); rig.updateMatrixWorld(true); }
+    spot = { x, z, yaw }; fadeM.material.opacity = 1; fadeGoal = 0; placeRig();
   }
-  const gamePoint = (dx, y, dz, out = new THREE.Vector3()) => out.set(spot.x + dx, y, spot.z + dz); // punto del juego relativo a tu posición
+  const gamePoint = (dx, y, dz, out = new THREE.Vector3()) => { // punto del juego relativo a tu posición (dx a tu derecha, dz hacia atrás)
+    const c = Math.cos(spot.yaw), s = Math.sin(spot.yaw);
+    return out.set(spot.x + dx * c + dz * s, y, spot.z - dx * s + dz * c);
+  };
 
   // botonera a tu izquierda: volver al menú y cambiar entre «ventana» y estadio completo
   const bar = new THREE.Group(); bar.visible = false; ui.add(bar);
@@ -439,11 +476,27 @@ export function initXR(api) {
   { const r = new THREE.Mesh(new THREE.RingGeometry(0.13, 0.15, 40), mat(C.sun, { transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })); r.rotation.x = -Math.PI / 2; tee.add(r);
     const d = new THREE.Mesh(new THREE.CircleGeometry(0.13, 40), mat(C.sea, { transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })); d.rotation.x = -Math.PI / 2; tee.add(d); }
   function placeGameUi() {
-    gamePoint(0, WINDOW.H / 2, -WINDOW.D, portal.position); portal.rotation.set(0, 0, 0);
+    gamePoint(0, WINDOW.H / 2, -WINDOW.D, portal.position); portal.rotation.set(0, spot.yaw, 0);
     gamePoint(-0.5, eye - 0.72, -0.28, bar.position); bar.lookAt(spot.x, bar.position.y + 0.25, spot.z);
+    if (legendG) { gamePoint(0.5, eye - 0.62, -0.3, legendG.position); legendG.lookAt(spot.x, legendG.position.y + 0.25, spot.z); }
   }
-  function floorPlace(o) { // el balón de la patada flota frente a tu cintura
-    gamePoint(0, eye - HANDKICK.TEE_DROP, -HANDKICK.TEE_D, _b); tee.position.set(_b.x, _b.y - 0.14, _b.z);
+  // leyenda del juego a tu derecha: una columna de botones (hechizos de Orlando, armas de Héroes…); set(k) ilumina uno
+  let legendG = null;
+  function legend(items, onPick) {
+    dropLegend(); const gL = new THREE.Group(); legendG = gL; gL.userData.on = null; ui.add(gL);
+    items.forEach((it, i) => place(button(0.26, 0.072, (g, W, H, st) => {
+      const on = gL.userData.on === it.k, hov = st === 'hover';
+      rr(g, 5, 5, W - 10, H - 10, (H - 10) / 2); g.fillStyle = on ? it.c : `rgba(20,26,61,${hov ? 1 : 0.9})`; g.fill();
+      g.lineWidth = on || hov ? 6 : 3; g.strokeStyle = on ? '#fff' : it.c; if (on) { g.shadowColor = it.c; g.shadowBlur = 16; } g.stroke(); g.shadowBlur = 0;
+      g.fillStyle = on ? C.ink : '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; fit(g, it.label, 800, 26, UIF, W - 40); g.fillText(it.label, W / 2, H / 2 + 2);
+    }, () => onPick(it.k)), gL, 0, ((items.length - 1) / 2 - i) * 0.082));
+    placeGameUi();
+    return { set(k) { gL.userData.on = k; for (const m of gL.children) if (m.userData.surf) m.userData.surf.paint(); }, dispose() { if (legendG === gL) dropLegend(); } };
+  }
+  function dropLegend() { if (!legendG) return; for (const m of [...legendG.children]) if (m.userData.surf) drop(m.userData.surf); legendG.removeFromParent(); legendG = null; }
+  function floorPlace(o) { // el balón de la patada flota frente a tu cintura (o queda en tu piso si pateas con los pies)
+    if (feet.on) { gamePoint(0, 0.13, -FEET.BALL_D, _b); tee.position.set(_b.x, 0.006, _b.z); }
+    else { gamePoint(0, eye - HANDKICK.TEE_DROP, -HANDKICK.TEE_D, _b); tee.position.set(_b.x, _b.y - 0.14, _b.z); }
     o.position.copy(o.parent ? o.parent.worldToLocal(_b) : _b);
     o.visible = true; kickBall = o; kickSeen = 0.15;
     return true;
@@ -459,8 +512,9 @@ export function initXR(api) {
         // barrido: el tramo que recorrió la mano desde el cuadro anterior (un golpe rápido puede atravesar el balón entre dos cuadros)
         _seg.set(p0, p); _seg.closestPointToPoint(_b, true, _to);
         if (_to.distanceTo(_b) > 0.12 + HANDKICK.REACH || v.dot(_to.copy(_b).sub(p0)) <= 0) continue;
-        const fwd = Math.max(-v.z, 0.3), up = v.y / fwd;
-        const pw = THREE.MathUtils.clamp(0.75 + HANDKICK.POWER * s + HANDKICK.LIFT * up, 0.8, 1.35), lat = THREE.MathUtils.clamp(v.x / fwd * HANDKICK.AIM, -1, 1);
+        const c = Math.cos(spot.yaw), sn = Math.sin(spot.yaw), vx = v.x * c - v.z * sn, vz = v.x * sn + v.z * c; // velocidad vista desde tu «al frente»
+        const fwd = Math.max(-vz, 0.3), up = v.y / fwd;
+        const pw = THREE.MathUtils.clamp(0.75 + HANDKICK.POWER * s + HANDKICK.LIFT * up, 0.8, 1.35), lat = THREE.MathUtils.clamp(vx / fwd * HANDKICK.AIM, -1, 1);
         haptic(1, 90, inp); kickBall = null; kickSeen = 0; tee.visible = false;
         _dbgKick = { pw, lat, s };
         sc.kick({ pw, lat }); return;
@@ -477,7 +531,7 @@ export function initXR(api) {
   }
   function gameEnd() { // deja los materiales y objetos como estaban (algunos modelos se comparten entre juegos)
     if (world) { world.full = true; applyWorld(); for (const [m, o] of world.mats) Object.assign(m, o); for (const [o, v] of world.vis) o.visible = v; }
-    world = null; kickBall = null; tee.visible = portal.visible = bar.visible = false;
+    world = null; kickBall = null; tee.visible = portal.visible = bar.visible = false; dropLegend();
     for (const m of [...bar.children]) if (m.userData.surf) drop(m.userData.surf);
   }
   function stencil(m, on) {
@@ -501,7 +555,7 @@ export function initXR(api) {
     walk(root);
     for (const k of world.keep) k.traverse(o => mats(o).forEach(m => stencil(m, on && behindWindow(k)))); // el balón: visible en tu cuarto, y dentro del estadio al cruzar la ventana
   }
-  const behindWindow = o => o.getWorldPosition(_b).z < portal.position.z;
+  const behindWindow = o => portal.worldToLocal(o.getWorldPosition(_b)).z < 0;
   function worldTick(dt) {
     if (!world) return;
     world.t += dt;
@@ -512,8 +566,57 @@ export function initXR(api) {
     const G = GAMES[key], s = SPORTS[key];
     if (!session) return;
     if (state !== 'game' || !bar.visible) return setTimeout(() => ready(key, start), 0); // espera a que el juego esté armado
-    card(G.title, `<p>${s ? s.how : ''}</p><p>🏠 A tu izquierda tienes el botón para volver al menú${world ? ` y 🌍 ${s.full.toLowerCase()}` : ''}.</p>`,
-      [{ label: '✋ ¡A JUGAR!', primary: true, fn: start }, { label: 'Volver al menú', fn: () => api.enter('hub') }], 'how');
+    const extra = `<p>🏠 A tu izquierda tienes el botón para volver al menú${world ? ` y 🌍 ${s.full.toLowerCase()}` : ''}.</p>`;
+    if (!G.foot) return card(G.title, `<p>${s ? s.how : ''}</p>${extra}`, [{ label: '✋ ¡A JUGAR!', primary: true, fn: start }, { label: 'Volver al menú', fn: () => api.enter('hub') }], 'how');
+    card(G.title, `<p>${s ? s.how : ''}</p><p>🦶 También puedes patear con tus pies si una PC con cámara te ve.</p>${extra}`, [
+      { label: '✋ Con la palma', primary: true, fn: () => { feet.on = false; start(); } },
+      { label: feet.conn ? '🦶 Con mis pies · PC lista' : '🦶 Con mis pies (PC)', fn: () => (feet.conn ? (feet.on = true, start()) : feetCard(key, start)) },
+      { label: 'Menú', fn: () => api.enter('hub') }
+    ], 'how');
+  }
+
+  // ---------- 🦶 patear con tus pies: la cámara de una PC te ve (sensor.html) y le avisa al visor ----------
+  // BALL_D: a cuántos metros frente a ti queda el balón en el piso · PEER: servicio gratuito que solo ayuda a que la PC y el visor se encuentren
+  // (el video nunca sale de la PC: solo viajan mensajes «patada: fuerza y dirección»)
+  const FEET = { BALL_D: 0.55, PEER: 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/+esm' };
+  const feet = { on: false, peer: null, conn: null, code: '', st: '' };
+  const sensorUrl = () => (location.host + location.pathname.replace(/[^/]*$/, '') + 'sensor.html');
+  async function feetConnect() {
+    if (feet.peer) return;
+    feet.code = feet.code || String(1000 + Math.floor(Math.random() * 9000));
+    try {
+      const mod = await import(FEET.PEER), Peer = mod.Peer || mod.default;
+      const peer = new Peer('florida-ar-' + feet.code); feet.peer = peer;
+      peer.on('connection', c => {
+        if (feet.conn) feet.conn.close();
+        feet.conn = c; c.on('data', onFeet);
+        c.on('open', () => { toast('🦶 PC conectada', 2500); api.sfx('coin'); });
+        c.on('close', () => { if (feet.conn === c) { feet.conn = null; toast('🦶 La PC se desconectó', 3000); } });
+      });
+      peer.on('error', e => {
+        console.warn('peer', e.type);
+        if (e.type === 'unavailable-id') { feetStop(); feet.code = ''; feetConnect(); } // código ocupado: se elige otro
+        else toast('🦶 No se pudo conectar con la PC (' + e.type + '). Revisa que los dos tengan internet.', 4500);
+      });
+    } catch (e) { toast('🦶 No se pudo cargar la conexión con la PC. Revisa el internet del visor.', 4500); }
+  }
+  function feetStop() { if (feet.peer) try { feet.peer.destroy(); } catch (e) {} feet.peer = feet.conn = null; feet.on = false; }
+  function feetCard(key, start) {
+    feet.code = feet.code || String(1000 + Math.floor(Math.random() * 9000)); feetConnect();
+    card('🦶 PATEA CON TUS PIES', `<ol><li>En la PC abre: <b>${sensorUrl()}</b></li><li>Escribe este código: <b>${feet.code}</b></li><li>Pon la PC frente a ti (hacia el arco), a 2 o 3 metros, que te vea de cuerpo entero.</li><li>El balón queda en tu piso: ¡patéalo con el pie!</li></ol>`, [
+      { label: '¡A PATEAR!', primary: true, fn: () => { feet.on = true; if (!feet.conn) toast('🦶 Esperando a la PC… escribe el código ' + feet.code, 5000); start(); } },
+      { label: 'Volver', fn: () => ready(key, start) }
+    ], 'how');
+  }
+  function onFeet(m) { // mensajes de la PC
+    if (!m || !session) return;
+    if (m.t === 'status' && m.s !== feet.st) { feet.st = m.s; if (feet.on && state === 'game') toast({ ok: '🦶 La PC te ve: ¡patea!', pies: '🦶 La PC no ve tus pies: aléjate un poco', nadie: '🦶 La PC no te ve' }[m.s] || '', 2200); }
+    if (m.t !== 'kick' || !feet.on) return;
+    const sc = api.current();
+    if (!kickBall || kickSeen <= 0 || !sc || !sc.kick || (sc.canKick && !sc.canKick())) return;
+    const pw = THREE.MathUtils.clamp(+m.pw || 1, 0.8, 1.35), lat = THREE.MathUtils.clamp(+m.lat || 0, -1, 1);
+    kickBall = null; kickSeen = 0; tee.visible = false; _dbgKick = { pw, lat, s: 0, feet: true };
+    sc.kick({ pw, lat });
   }
 
   // ---------- fondo simple si el visor solo tiene realidad virtual (sin cámaras de passthrough) ----------
@@ -568,7 +671,7 @@ export function initXR(api) {
   function end() { if (session) session.end().catch(() => {}); }
   renderer.xr.addEventListener('sessionend', () => { // al quitarte el visor o tocar «Salir»: todo vuelve a la pantalla del celular
     session = null; renderer.xr.enabled = false;
-    gameEnd(); state = ''; rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.updateMatrixWorld(true); // la cámara del celular vuelve a su lugar
+    gameEnd(); feetStop(); state = ''; rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0); rig.updateMatrixWorld(true); // la cámara del celular vuelve a su lugar
     closeCard(); drop(toastS); toastS = null; setSlot('info', ''); setSlot('hint', '');
     for (const p of pops.splice(0)) drop(p);
     for (const m of [...menu.children]) if (m.userData.surf) drop(m.userData.surf);
@@ -620,7 +723,7 @@ export function initXR(api) {
     where: name => { // centro (en el mundo) de un botón del menú o de la tarjeta: 'heat', 'fg', 'penalty', 'orlando'…, 'salir', 'sonido' o 'card0'
       const btns = gr => gr.children.filter(m => m.userData.surf && m.userData.surf.onPress);
       const ms = name.startsWith('card') ? (cardG ? btns(cardG) : []) : name.startsWith('bar') ? btns(bar) : btns(menu);
-      const idx = /^(card|bar)\d$/.test(name) ? +name.slice(-1) : ['heat', 'fg', 'penalty', ...ORDER.filter(([k]) => !SPORTS[k]).map(([k]) => k), 'salir', 'sonido'].indexOf(name);
+      const idx = /^(card|bar)\d$/.test(name) ? +name.slice(-1) : ['heat', 'fg', 'penalty', 'orlando', 'heroes', ...ORDER.filter(([k]) => !SPORTS[k]).map(([k]) => k), 'salir', 'sonido'].indexOf(name);
       const m = ms[idx]; if (!m) return null;
       const p = m.getWorldPosition(new THREE.Vector3()), n = new THREE.Vector3(0, 0, 1).applyQuaternion(m.getWorldQuaternion(new THREE.Quaternion()));
       return { p: p.toArray(), n: n.toArray() };
@@ -633,5 +736,5 @@ export function initXR(api) {
     ray: i => { inputs[i].ctl.getWorldPosition(_o); inputs[i].ctl.getWorldQuaternion(_q); return { o: _o.toArray(), d: _d.set(0, 0, -1).applyQuaternion(_q).toArray() }; }
   };
   return {
-    on: () => !!session, isAR: () => xmode === 'immersive-ar', start, end, showMenu, afterRender, recenter, teleport, gamePoint, eye: () => eye, floorPlace, gameStart, gameEnd, ready, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
+    on: () => !!session, isAR: () => xmode === 'immersive-ar', start, end, showMenu, afterRender, legend, recenter, teleport, gamePoint, eye: () => eye, floorPlace, gameStart, gameEnd, ready, card, toast, info: t => setSlot('info', t), hint: t => setSlot('hint', t), pop, countdown, fade, flash, shake, haptic, frame, inputs, _dbg };
 }

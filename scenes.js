@@ -872,6 +872,7 @@ function orlando(ctx, opt) {
     c2.shadowBlur = 0; c2.strokeStyle = 'rgba(255,255,255,.9)'; c2.lineWidth = 3; c2.stroke(); c2.globalAlpha = 1;
   }
   function demo(k) { // dibuja la figura de ejemplo en la pantalla
+    if (opt.xr) { demo3 = { k, t: 0 }; ctx.toast(`${SP[k].icon} ${SP[k].name}: dibuja ${SP[k].how} en el aire`, 2600); return; } // 🥽 en el visor: con chispas frente a ti
     const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.5, r = Math.min(w, h) * 0.2, pts = [];
     if (k === 'line') for (let i = 0; i <= 30; i++) pts.push({ x: cx - r * 1.3 + i / 30 * r * 2.6, y: cy + r * 0.5 - i / 30 * r });
     else if (k === 'circle') for (let i = 0; i <= 48; i++) { const a = -Math.PI / 2 + i / 48 * Math.PI * 2; pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }); }
@@ -879,10 +880,73 @@ function orlando(ctx, opt) {
     trail.demo = { k, pts, t: 0 }; trail.fade = 0;
     ctx.toast(`${SP[k].icon} ${SP[k].name}: dibuja ${SP[k].how}` + (k === 'circle' ? ' (también sirve la palma abierta ✋)' : ''), 2600);
   }
+  // ===== 🥽 Quest: la varita en tu mano derecha, hechizos dibujados en el aire y la leyenda en 3D =====
+  // PX: «píxeles» por metro de trazo (para el reconocedor de figuras de gestures.js) · PALM: segundos con la palma abierta hacia el mago para el escudo
+  // PALM_CD: espera entre escudos con la palma (s) · SHELF: a qué distancia (m) flota la vitrina de varitas · TOUCH: qué tan cerca debe estar tu dedo de una varita (m)
+  const XO = { PX: 1000, PALM: 0.25, PALM_CD: 1.5, SHELF: 0.5, TOUCH: 0.07 };
+  const XSP = [{ k: 'zigzag', label: '⚡ Zigzag · Rayo', c: '#ffd23a' }, { k: 'line', label: '➖ Línea · Desarme', c: '#ff4d5e' }, { k: 'circle', label: '⭕ Círculo · Escudo', c: '#66ccff' }];
+  let self = null, xLeg = null, xStroke = null, xFade = 0, palmT = 0, palmCd = 0, demo3 = null;
+  const _xv = new V3(), _xr = new V3(), _xq = new THREE.Quaternion(), xRay = new THREE.Raycaster();
+  const xLine = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * 400), 3)), temp(new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthTest: false })));
+  xLine.frustumCulled = false; xLine.renderOrder = 50; xLine.visible = false;
+  const xIn = () => { const ins = ctx.xr().inputs; return ins.find(i => i.src && i.ok && i.src.handedness === 'right') || ins.find(i => i.src && i.ok); }; // la mano de la varita
+  if (opt.xr) { camera.remove(shelf); g.add(shelf); shelf.scale.setScalar(1); camera.remove(wand); g.add(wand); g.add(xLine); } // ya no van pegadas a la cámara
+  function placeShelf() { ctx.xr().gamePoint(0, ctx.xr().eye() - 0.3, -XO.SHELF, shelf.position); shelf.lookAt(camW()); }
+  function xrPick(inp) { // ¿qué varita toca tu dedo o apunta tu rayo?
+    if (!inp || !inp.src || !inp.ok) return null;
+    if (inp.src.hand) { const l = shelf.worldToLocal(_xv.copy(inp.tip)); for (const h of picks) if (Math.abs(l.x - h.position.x) < 0.04 && Math.abs(l.y) < 0.2 && Math.abs(l.z) < XO.TOUCH) return { i: h.userData.i, touch: true }; }
+    inp.ctl.getWorldPosition(_xv); _xr.set(0, 0, -1).applyQuaternion(inp.ctl.getWorldQuaternion(_xq)); xRay.set(_xv, _xr);
+    const hit = xRay.intersectObjects(picks, true).find(o => o.object.userData.wi !== undefined);
+    return hit ? { i: hit.object.userData.wi, touch: false } : null;
+  }
+  function xrChoose(i) { choosing = false; shelf.visible = false; setWand(i); chosenWand = i; ctx.sfx('pickup'); ctx.toast(`🪄 Varita de ${W.name}: ${W.note}`, 3000); if (self) self.start(); }
+  function xrHover() { let hv = null; for (const inp of ctx.xr().inputs) { const r = xrPick(inp); if (!r) continue; if (r.touch) { xrChoose(r.i); return null; } hv = r.i; } return hv; }
+  function xrInput(type, inp) { // pinza (o gatillo): elegir varita · mantenerla = dibujar · soltarla = lanzar el hechizo
+    if (!opt.xr) return;
+    if (choosing) { if (type === 'selectstart') { const r = xrPick(inp); if (r) xrChoose(r.i); } return; }
+    if (!running) return;
+    if (type === 'selectstart') { // el trazo se dibuja en un plano frente a tu cabeza
+      camera.getWorldQuaternion(_xq); xStroke = { inp, pts: [], right: new V3(1, 0, 0).applyQuaternion(_xq), up: new V3(0, 1, 0).applyQuaternion(_xq) };
+      xFade = 0; xLine.geometry.setDrawRange(0, 0); xLine.material.color.set(0xffffff);
+    } else if (type === 'selectend' && xStroke && xStroke.inp === inp) {
+      const s = xStroke, P0 = s.pts[0]; xStroke = null; xFade = 1;
+      finishStroke(P0 ? s.pts.map(p => ({ x: _xv.copy(p).sub(P0).dot(s.right) * XO.PX, y: -_xv.copy(p).sub(P0).dot(s.up) * XO.PX })) : []);
+      xLine.material.color.set(trail.col);
+    }
+  }
+  function shape(k, u) { // figura de ejemplo, en metros (x a la derecha, y hacia arriba)
+    const r = 0.18;
+    if (k === 'line') return [-0.23 + u * 0.46, -0.09 + u * 0.18];
+    if (k === 'circle') { const a = Math.PI / 2 - u * Math.PI * 2; return [Math.cos(a) * r, Math.sin(a) * r]; }
+    const V = [[-1, 0.7], [1, 0.7], [-1, -0.7], [1, -0.7]], s = Math.min(2.999, u * 3), i = Math.floor(s), f = s - i; // zigzag en «Z»
+    return [r * (V[i][0] + (V[i + 1][0] - V[i][0]) * f), r * (V[i][1] + (V[i + 1][1] - V[i][1]) * f)];
+  }
+  function xrWand(dt) { // la varita sale de tu mano derecha, apuntando hacia donde apuntas
+    const inp = xIn(); wand.visible = !!inp && !intro.on && !choosing;
+    if (inp) { inp.ctl.getWorldQuaternion(_xq); _xr.set(0, 0, -1).applyQuaternion(_xq); wand.position.copy(inp.palmPos); wand.lookAt(_xv.copy(inp.palmPos).add(_xr)); wand.rotateX(-kick * 0.5); }
+    if (xStroke) { // estela de luz: la punta de la varita (o tu dedo, si dibujas con la otra mano)
+      const q = xStroke.inp, p = q === inp ? tip.getWorldPosition(_xv) : q.src && q.src.hand ? q.tip : q.grabPos, L = xStroke.pts, last = L[L.length - 1];
+      if ((!last || last.distanceTo(p) > 0.004) && L.length < 400) {
+        L.push(p.clone()); const a = xLine.geometry.attributes.position; a.setXYZ(L.length - 1, p.x, p.y, p.z); a.needsUpdate = true; xLine.geometry.setDrawRange(0, L.length);
+      }
+      xLine.visible = true; xLine.material.opacity = 1; ctx.burst(p, 0xfff1c0, 1, 0.05);
+    } else if (xFade > 0) { xFade = Math.max(0, xFade - dt * 2); xLine.material.opacity = xFade; if (!xFade) xLine.visible = false; }
+    // palma abierta hacia el mago (con una runa activa) = escudo
+    palmCd = Math.max(0, palmCd - dt); enC.copy(en.position).setY(1.15); let pal = false;
+    for (const q of ctx.xr().inputs) if (q.src && q.src.hand && q.ok && q.open && (!xStroke || xStroke.inp !== q) && q.palmPos.distanceTo(camW()) > 0.3 && q.palmN.dot(_xr.copy(enC).sub(q.palmPos).normalize()) > 0.75) pal = true;
+    palmT = pal ? palmT + dt : 0;
+    if (running && palmT > XO.PALM && !palmCd && turn && !turn.done) { palmCd = XO.PALM_CD; palmT = 0; cast('circle'); }
+    if (demo3) { // demostración de la figura (al tocar la leyenda): chispas frente a ti
+      if (!demo3.o) { camera.getWorldQuaternion(_xq); demo3.r = new V3(1, 0, 0).applyQuaternion(_xq); demo3.u = new V3(0, 1, 0).applyQuaternion(_xq); demo3.o = camW().clone().add(_xr.set(0, 0, -1).applyQuaternion(_xq)); }
+      demo3.t += dt; const [x, y] = shape(demo3.k, Math.min(1, demo3.t / 0.8));
+      ctx.burst(_xv.copy(demo3.o).addScaledVector(demo3.r, x).addScaledVector(demo3.u, y), SP[demo3.k].col, 3, 0.05);
+      if (demo3.t > 1.1) demo3 = null;
+    }
+  }
   // leyenda de abajo: las 3 figuras. Tocar una muestra cómo se dibuja; se ilumina la que pide la runa
   const ui = document.getElementById('spells'), btns = [...ui.querySelectorAll('.sp')];
   btns.forEach(b => { b.onclick = () => { ctx.sfx('click'); demo(b.dataset.s); }; });
-  const legend = k => btns.forEach(x => x.classList.toggle('on', x.dataset.s === k));
+  const legend = k => { btns.forEach(x => x.classList.toggle('on', x.dataset.s === k)); if (xLeg) xLeg.set(k); };
   legend(null);
 
   let alive = true, running = false, hits = 0, hp = 4, cd = 0, shieldT = 0, stun = 0, disarm = 0, dead = 0, won = false, tx = 0, moveT = 0, kick = 0, castAnim = 0, gateOpen = 0, gateSnd = false;
@@ -903,7 +967,7 @@ function orlando(ctx, opt) {
     { t: 21, p: [0, 1.6, -14], yaw: Math.PI * 2, pitch: 0.05 },
     { t: 21.5, p: [0, 1.6, -14], yaw: Math.PI * 2, pitch: 0 }
   ], 0, 0, () => {
-    ctx.camera.position.set(0, 1.6, -14); gateOpen = 1;
+    ctx.camera.position.set(0, 1.6, -14); gateOpen = 1; ctx.teleport(0, -14); // 🥽 en el visor apareces frente al mago
     en.visible = true; ctx.sfx('portal');
     ctx.burst(en.localToWorld(_v.set(0, 1.2, 0)), [0x9b5cff, 0x66ffcc, 0xffffff], 70, 2.2);
   });
@@ -915,7 +979,7 @@ function orlando(ctx, opt) {
     if (turnN >= 3 && type === lastType && sameN >= 1) type = pick(Object.keys(NEED).filter(k => k !== lastType)); // nunca 3 runas iguales seguidas
     sameN = type === lastType ? sameN + 1 : 0; lastType = type; turnN++;
     const k = NEED[type];
-    turn = { type, need: k, t: 0, win: DUEL.win[type] * (fast() ? DUEL.fast : 1) * (ctx.isHand() ? DUEL.hand : 1), fired: false, done: false };
+    turn = { type, need: k, t: 0, win: DUEL.win[type] * (fast() ? DUEL.fast : 1) * (ctx.isHand() || opt.xr ? DUEL.hand : 1), fired: false, done: false };
     rune.material.map = runeTex[k]; rune.visible = true; rune.scale.setScalar(0.01);
     runes.material.color.set(SP[k].col); legend(k); ctx.sfx('charge');
     if (type === 'barrier') { barrier.visible = true; barrier.scale.setScalar(0.01); }
@@ -989,15 +1053,16 @@ function orlando(ctx, opt) {
     choosing = false; shelf.visible = false; setWand(i); chosenWand = i; ctx.sfx('pickup'); ctx.toast(`🪄 Varita de ${W.name}: ${W.note}`, 3000); return true;
   }
   const refreshHint = () => ctx.hint(turn ? `Runa ${SP[turn.need].icon}: ¡dibuja ${SP[turn.need].how}!`
+    : opt.xr ? '🪄 Junta índice y pulgar y dibuja con la varita la figura de la runa · ✋ palma abierta hacia el mago = escudo'
     : ctx.isHand() ? '☝️ Dibuja en el aire con tu índice la figura de la runa del mago · ✋ palma abierta = escudo' : '👆 Dibuja con el dedo, en la pantalla, la figura de la runa del mago');
   const coTmp = new V3();
 
   return {
-    look: false, camLock: !opt.quick, dwellTime: 0.6, refreshHint, _dbg: { cast: k => cast(k), need: () => (turn && !turn.done ? turn.need : null) },
+    look: false, camLock: !opt.quick, dwellTime: 0.6, refreshHint, xrInput, xrRays: () => opt.xr && choosing, _dbg: { cast: k => cast(k), need: () => (turn && !turn.done ? turn.need : null) },
     start() {
-      this.camLock = false;
-      if (chosenWand !== null) { running = true; gap = 1.4; ui.classList.remove('hidden'); document.body.classList.add('hasbar'); info(); ctx.pop('¡A DUELO!', 'fire'); refreshHint(); return; }
-      choosing = true; shelf.visible = true; wand.visible = false; ui.classList.add('hidden'); ctx.info('🪄 Elige tu varita');
+      this.camLock = false; self = this;
+      if (chosenWand !== null) { if (opt.xr && !xLeg) xLeg = ctx.xr().legend(XSP, k => demo(k)); running = true; gap = 1.4; ui.classList.remove('hidden'); document.body.classList.add('hasbar'); info(); ctx.pop('¡A DUELO!', 'fire'); refreshHint(); return; }
+      choosing = true; shelf.visible = true; wand.visible = false; if (opt.xr) placeShelf(); ui.classList.add('hidden'); ctx.info('🪄 Elige tu varita');
       ctx.hint((ctx.isHand() ? '☝️ Señala' : '👆 Toca') + ' la varita que quieras: ' + WANDS.map(d => d.name).join(' · '));
     },
     tap(p) { // con la mano: dejar el dedo quieto sobre una varita la elige
@@ -1037,7 +1102,7 @@ function orlando(ctx, opt) {
       }
       gates.forEach((h, i) => { h.rotation.y = (i ? -1 : 1) * 1.75 * gateOpen; });
       // ambiente del parque (solo se anima lo que está cerca de la cámara)
-      const near = camera.position.z > -5;
+      const near = camW().z > -5;
       if (near) {
         FW.rot.rotation.z += dt * 0.06; FW.gond.forEach(c => (c.rotation.z = -FW.rot.rotation.z));
         CO.u = (CO.u + dt * 0.05) % 1;
@@ -1070,9 +1135,9 @@ function orlando(ctx, opt) {
       kick = Math.max(0, kick - dt * 5);
       const n = ctx.ptr.ndc, hh = 0.45 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hw = hh * camera.aspect;
       wand.visible = !intro.on && !choosing;
-      if (choosing) { hoverW = pickW(ctx.ptr); picks.forEach(h => { h.rotation.y += dt * 1.2; h.scale.setScalar(h.userData.i === hoverW ? 1.25 : 1); }); if (hoverW !== null && hoverW !== undefined) ctx.info(`🪄 ${WANDS[hoverW].name} — ${WANDS[hoverW].note}`); }
-      wand.position.set((n.x * 0.5 + 0.38) * hw, (n.y * 0.4 - 0.58) * hh, -0.42);
-      wand.lookAt(en.localToWorld(_v.set(0, 1.2, 0))); wand.rotateX(-kick * 0.5);
+      if (choosing) { hoverW = opt.xr ? xrHover() : pickW(ctx.ptr); picks.forEach(h => { h.rotation.y += dt * 1.2; h.scale.setScalar(h.userData.i === hoverW ? 1.25 : 1); }); if (hoverW !== null && hoverW !== undefined) ctx.info(`🪄 ${WANDS[hoverW].name} — ${WANDS[hoverW].note}`); }
+      if (opt.xr) xrWand(dt);
+      else { wand.position.set((n.x * 0.5 + 0.38) * hw, (n.y * 0.4 - 0.58) * hh, -0.42); wand.lookAt(en.localToWorld(_v.set(0, 1.2, 0))); wand.rotateX(-kick * 0.5); }
       if (!kick && turn) tip.material.color.set(SP[turn.need].col);
       const cw = camW();
       for (let i = flying.length - 1; i >= 0; i--) { const f = flying[i], u = f.userData; u.life -= dt; u.v.y -= 9 * dt; f.position.addScaledVector(u.v, dt); f.rotation.x += dt * 12; if (f.position.y < 0.05) { f.position.y = 0.05; u.v.set(0, 0, 0); } if (u.life <= 0) remove(flying, i); }
@@ -1141,7 +1206,7 @@ function orlando(ctx, opt) {
       }
     },
     dispose() {
-      alive = false; running = false; restoreEnv();
+      alive = false; running = false; restoreEnv(); if (xLeg) xLeg.dispose();
       camera.remove(wand); camera.remove(shield); camera.remove(shelf); disposeTree(wand); disposeTree(shield); disposeTree(shelf);
       ui.classList.add('hidden'); document.body.classList.remove('hasbar'); legend(null); cv.remove(); document.getElementById('crosshair').classList.add('hidden');
     }
@@ -1857,8 +1922,8 @@ function heat(ctx, opt) {
   const SPOTS = [[0, 0, 'Tiro libre'], [-3.6, -1.2, 'Ala izquierda'], [3.6, -1.2, 'Ala derecha'], [0, 2.2, 'Frente al aro, más lejos'], [-2, 1.2, 'Diagonal izquierda']];
   const spot = new V3(0, 1.6, 0), spotFrom = new V3(0, 1.6, 0); let spotT = 1;
   function moveSpot(i) {
+    if (opt.xr) return goZone(i); // 🥽 en el visor: siguiente zona de tiro (salto con fundido)
     const S2 = SPOTS[i % SPOTS.length]; spotFrom.copy(camera.position); spot.set(S2[0], 1.6, S2[1]); spotT = 0;
-    if (opt.xr) { spotT = 1; ctx.teleport(S2[0], S2[1]); } // 🥽 en el visor: salto con fundido (sin desplazar la vista)
     ctx.toast(`📍 Nueva posición: ${S2[2]}`, 2500);
   }
   function drawBoard() {
@@ -1874,44 +1939,116 @@ function heat(ctx, opt) {
   const handPos = o => camera.localToWorld(o.copy(HOLD));
   const setPos = o => camera.localToWorld(o.set(SETP.x + set.lat * 0.08, SETP.y, SETP.z));
   ball.position.copy(handPos(_h));
-  // ===== 🥽 Quest: agarrar con la pinza, driblar soltándolo hacia tu piso y lanzar con el brazo (xr.js da la posición y velocidad de tu mano) =====
-  // GRAB_R: a qué distancia de tu mano puedes agarrar el balón (m) · THROW_K: multiplica la fuerza de tu lanzamiento
-  // ASSIST: 0 a 1, cuánto se corrige el tiro hacia el aro si apuntas más o menos bien · AIM_DEG: hasta qué ángulo ayuda
-  // PERFECT: qué tan parecido al tiro ideal debe ser para «¡PERFECTO!» (más grande = más fácil)
-  const XRB = { GRAB_R: 0.24, THROW_K: 1.1, ASSIST: 0.55, AIM_DEG: 30, PERFECT: 0.14 };
-  let held = null;
-  const home = o => ctx.xr().gamePoint(0.15, ctx.xr().eye() - 0.45, -0.38, o); // el balón te espera flotando frente a tu pecho
-  function xrInput(type, inp) {
-    if (!running) return;
-    if (type === 'selectstart' || type === 'squeezestart') {
-      if (held || !inp.ok || (st.mode === 'fly' && !st.drib && st.t < 0.6)) return; // un tiro recién lanzado no se agarra
-      if (inp.grabPos.distanceTo(ball.position) > XRB.GRAB_R + BR) return;
-      held = inp; st.mode = 'held'; ctx.sfx('pickup'); ctx.xr().haptic(0.4, 40, inp);
-    } else if ((type === 'selectend' || type === 'squeezeend') && held === inp) xrRelease();
+  // ===== 🥽 Quest: agarrar con la PALMA, driblar empujando hacia tu piso, tirar con la barra (estilo 2K) y CLAVAR =====
+  // XZ: zonas de tiro (d = metros al aro, a = ángulo, pts = puntos). Al encestar pasas a la siguiente; la última es la clavada.
+  // GRAB: distancia de la palma al balón para que se pegue (m) · SET_Y: la barra empieza al subir el balón a esta altura (m, respecto a tus ojos)
+  // FILL: segundos que tarda la barra en llenarse · GREEN: dónde está el verde (0 abajo, 1 arriba) · GREEN_W: medio ancho del verde · YELLOW: ancho del amarillo
+  // SHOOT_V: rapidez de la mano (m/s) que suelta el tiro · DRIB_V: rapidez hacia abajo que cuenta como dribleo · DUNK_R: a qué distancia del aro puedes clavar (m)
+  // THROW_K / ASSIST / AIM_DEG: lanzamiento sin barra (con el balón bajo): fuerza, ayuda hacia el aro (0 a 1) y hasta qué ángulo ayuda
+  const XZ = [
+    { n: 'BANDEJA', d: 1.4, a: -0.6, pts: 2 }, { n: 'DOBLE', d: 3.6, a: 0.5, pts: 2 }, { n: 'TRIPLE', d: 6.75, a: 0, pts: 3 },
+    { n: 'DOBLE', d: 4.2, a: -0.8, pts: 2 }, { n: 'CLAVADA', d: 1.0, a: 0, pts: 2 }
+  ];
+  const XRB = { GRAB: 0.07, SET_Y: -0.08, FILL: 0.85, GREEN: 0.8, GREEN_W: 0.08, YELLOW: 0.07, SHOOT_V: 1.8, DRIB_V: 0.9, DUNK_R: 1.7, THROW_K: 1.1, ASSIST: 0.55, AIM_DEG: 30 };
+  let held = null, zone = 0, xset = null, cool = 0, dunkT = 0;
+  const dunkFrom = new V3(), _w2 = new V3(), _cq = new THREE.Quaternion();
+  const xr = () => ctx.xr();
+  const home = o => xr().gamePoint(0.15, xr().eye() - 0.45, -0.38, o); // el balón te espera flotando frente a tu pecho
+  // barra de tiro junto al balón, siempre de frente a ti: amarillo = pega en el aro · verde = entra
+  const meter3 = new THREE.Group(); meter3.visible = false; g.add(meter3);
+  const mbar = (w, h, c, o, k) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), temp(new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthTest: false, toneMapped: false }))); m.renderOrder = 60 + k; m.position.z = k * 0.001; meter3.add(m); return m; };
+  const MH = 0.26; mbar(0.05, MH + 0.02, 0x0b1026, 0.85, 0);
+  const mYel = mbar(0.036, 1, 0xffd54a, 0.9, 1), mGrn = mbar(0.036, 1, 0x3ddc84, 1, 2), mMark = mbar(0.07, 0.012, 0xffffff, 1, 3);
+  // aro de luz en el piso: tu zona de tiro
+  const zoneRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.36, 40), temp(new THREE.MeshBasicMaterial({ color: 0xffd54a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, toneMapped: false, depthWrite: false })));
+  zoneRing.rotation.x = -Math.PI / 2; zoneRing.visible = false; g.add(zoneRing);
+  const greenW = () => XRB.GREEN_W + Math.min(drib.n, 4) * 0.012 + (fire ? 0.02 : 0); // driblar antes de tirar agranda el verde
+  const nearRim = () => { camera.getWorldPosition(_w2); return Math.hypot(_w2.x - RIM.x, _w2.z - RIM.z) < XRB.DUNK_R; };
+  function goZone(i) { // te lleva a la zona de tiro (mirando al aro)
+    zone = i % XZ.length; const Z = XZ[zone], x = RIM.x + Math.sin(Z.a) * Z.d, z = RIM.z + Math.cos(Z.a) * Z.d;
+    held = null; xset = null; meter3.visible = false;
+    ctx.teleport(x, z, RIM.x, RIM.z); zoneRing.position.set(x, 0.01, z); zoneRing.visible = true;
+    ctx.pop(Z.n); ctx.toast(zone === XZ.length - 1 ? '📍 CLAVADA: sube el balón sobre tu cabeza y bájalo fuerte hacia el aro' : `📍 ${Z.n}: ${Z.pts} puntos`, 3200);
   }
-  function xrRelease() {
-    const inp = held; held = null; if (!inp) return;
-    const v = _k.copy(inp.pg.v).multiplyScalar(XRB.THROW_K);
-    Object.assign(st, { mode: 'fly', t: 0, scored: false, inNet: 0, rim: false, slowed: false, err: 0, perfect: false, lastBounce: -1, drib: true });
+  const canGrab = () => cool <= 0 && (st.mode === 'rest' || st.mode === 'drib' || (st.mode === 'fly' && (st.drib || st.t > 0.6)));
+  function grab(inp) { held = inp; st.mode = 'held'; xset = null; ctx.sfx('pickup'); xr().haptic(0.4, 40, inp); }
+  function xrInput(type, inp) { // con controles: el botón de agarre (o el gatillo) agarra y suelta. Con las manos se usa la palma (xrHands)
+    if (!running || !inp.src || inp.src.hand) return;
+    if (type === 'selectstart' || type === 'squeezestart') { if (!held && canGrab() && inp.grabPos.distanceTo(ball.position) < BR + 0.2) grab(inp); }
+    else if (held === inp) letGo(inp, true);
+  }
+  function xrHands() { // con las manos: tocar el balón con la palma lo agarra; si la palma va encima y bajando, lo dribla
+    if (!running) return;
+    for (const inp of xr().inputs) {
+      if (!inp.src || !inp.src.hand || !inp.ok) continue;
+      if (held === inp) { letGo(inp, false); continue; }
+      if (held || !canGrab() || inp.palmPos.distanceTo(ball.position) > BR + XRB.GRAB) continue;
+      if (inp.pp.v.y < -XRB.DRIB_V && inp.palmPos.y > ball.position.y) dribble(inp, inp.pp.v); else grab(inp);
+    }
+  }
+  function letGo(inp, button) { // qué hiciste con el balón: clavada, tiro con la barra, dribleo o lanzamiento libre
+    const v = inp.pp.v, sp = v.length();
+    if (nearRim() && ball.position.y > xr().eye() + 0.02 && v.y < -2) return dunk();
+    if (xset && (button || (sp > XRB.SHOOT_V && xset.t > 0.2 && v.y > -0.3))) return meterShot(inp);
+    if (v.y < -XRB.DRIB_V && -v.y > Math.hypot(v.x, v.z)) return dribble(inp, v);
+    if (button || (sp > 3 && v.y > 0.5)) freeThrow(inp);
+  }
+  function dribble(inp, v) { // baja con la fuerza de tu mano y el rebote vuelve a la altura de tu palma
+    held = null; xset = null; meter3.visible = false; cool = 0.25;
+    Object.assign(st, { mode: 'fly', t: 0, scored: false, inNet: 0, rim: false, slowed: false, perfect: false, lastBounce: -1, drib: true, dribH: Math.max(0.7, inp.palmPos.y - 0.05) });
+    st.v.set(v.x * 0.2, Math.min(v.y * 1.3, -2.8), v.z * 0.2);
+  }
+  function meterShot(inp) { // tiro con la barra: verde entra, amarillo pega en el aro, fuera falla (pronto = corto, tarde = largo)
+    const m = xset.t / XRB.FILL, hw = greenW(), e = m - XRB.GREEN, perfect = Math.abs(e) <= hw, near = !perfect && Math.abs(e) <= hw + XRB.YELLOW;
+    const err = perfect ? 0 : near ? Math.sign(e) * 0.35 : clamp(e / 0.2, -1, 1);
+    const v = inp.pp.v, toR = _r.copy(RIM).sub(ball.position); let lat = 0;
+    if (!perfect && Math.hypot(v.x, v.z) > 0.5) lat = clamp(-Math.atan2(v.x * toR.z - v.z * toR.x, v.x * toR.x + v.z * toR.z) / 0.7, -1, 1) * 0.4; // muy de lado: se abre
+    held = null; xset = null; meter3.visible = false; cool = 0.4; st.drib = false; st.dribH = 0;
+    shoot(err, lat, perfect);
+    if (perfect) { ctx.pop('¡VERDE!'); ctx.sfx('perfect'); } else ctx.pop(near ? 'CASI…' : err < 0 ? 'MUY PRONTO' : 'MUY TARDE', 'bad');
+  }
+  function freeThrow(inp) { // lanzamiento sin barra (balón bajo): física real con un poco de ayuda hacia el aro
+    held = null; xset = null; meter3.visible = false; cool = 0.4;
+    const v = _k.copy(inp.pp.v).multiplyScalar(XRB.THROW_K);
+    Object.assign(st, { mode: 'fly', t: 0, scored: false, inNet: 0, rim: false, slowed: false, err: 0, perfect: false, lastBounce: -1, drib: false, dribH: 0 });
     st.v.copy(v);
     const toR = _r.copy(RIM).sub(ball.position), hd = Math.hypot(toR.x, toR.z), hs = Math.hypot(v.x, v.z);
-    if (v.y < 0 || hs < 0.4 || v.length() < 1.2) return; // hacia abajo (o sin fuerza): es un dribleo, el balón rebota y lo vuelves a agarrar
-    st.drib = false;
-    const ang = THREE.MathUtils.radToDeg(Math.acos(clamp((v.x * toR.x + v.z * toR.z) / (hs * hd), -1, 1)));
-    if (ang < XRB.AIM_DEG) { // apuntaste al aro: el tiro se corrige un poco (y del todo si fue casi perfecto)
-      // tiro ideal en arco: entra al aro cayendo con al menos 40° (si llega plano, choca con el borde del aro)
+    if (hs < 0.4) { st.drib = true; return; } // sin fuerza: el balón cae y lo vuelves a agarrar
+    if (THREE.MathUtils.radToDeg(Math.acos(clamp((v.x * toR.x + v.z * toR.z) / (hs * hd), -1, 1))) < XRB.AIM_DEG) {
       const T = clamp(Math.max(hd / hs, Math.sqrt(2 * (Math.max(toR.y, 0.1) + 0.84 * hd) / GRAV)), 0.6, 1.8), ideal = _q.copy(toR).divideScalar(T); ideal.y += 0.5 * GRAV * T;
-      st.perfect = v.distanceTo(ideal) / ideal.length() < XRB.PERFECT + Math.min(drib.n, 4) * 0.02 + (fire ? 0.02 : 0);
-      st.v.lerp(ideal, st.perfect ? 1 : XRB.ASSIST);
+      st.v.lerp(ideal, XRB.ASSIST); // tiro en arco: entra cayendo con al menos 40°
     }
     shots++; drib.n = 0; info(); ctx.sfx('throw');
-    if (st.perfect) { ctx.pop('¡PERFECTO!'); ctx.sfx('perfect'); }
+  }
+  function dunk() { // ¡clavada! el balón vuela al aro y lo atraviesa (tu vista no se mueve)
+    held = null; xset = null; meter3.visible = false; cool = 0.6; dunkT = 0; dunkFrom.copy(ball.position);
+    Object.assign(st, { mode: 'dunk', dunk: true, drib: false, dribH: 0, scored: false, perfect: true, t: 0 }); shots++; info();
+    ctx.sfx('throw'); xr().haptic(1, 140);
   }
   function xrBall(dt) { // devuelve true si el visor se encargó del balón en este cuadro
+    cool -= dt; xrHands();
     if (st.mode === 'held') {
-      if (!held || !held.src) { held = null; st.mode = 'rest'; return true; }
-      _d.copy(held.grabPos).sub(held.palmPos); const L = _d.length(); // el balón queda justo delante de tus dedos
-      ball.position.copy(held.grabPos).addScaledVector(_d, L > 0.01 ? 0.07 / L : 0); ball.rotation.y += dt; return true;
+      if (!held || !held.src) { held = null; st.mode = 'rest'; meter3.visible = false; return true; }
+      ball.position.copy(held.palmPos).addScaledVector(held.palmN, BR + 0.015); ball.rotation.y += dt; // el balón descansa sobre tu palma
+      const eye = xr().eye(); // la barra aparece al subir el balón sobre tu cabeza; si lo bajas, se reinicia
+      if (!xset && ball.position.y > eye + XRB.SET_Y) { xset = { t: 0 }; ctx.sfx('charge'); }
+      else if (xset && ball.position.y < eye + XRB.SET_Y - 0.15) xset = null;
+      meter3.visible = !!xset;
+      if (xset) {
+        xset.t += dt; const m = xset.t / XRB.FILL, hw = greenW();
+        camera.getWorldQuaternion(_cq); meter3.quaternion.copy(_cq); meter3.position.copy(ball.position).add(_w2.set(0.2, 0, 0).applyQuaternion(_cq));
+        mGrn.scale.y = hw * 2 * MH; mGrn.position.y = (XRB.GREEN - 0.5) * MH;
+        mYel.scale.y = (hw + XRB.YELLOW) * 2 * MH; mYel.position.y = mGrn.position.y;
+        mMark.position.y = (Math.min(m, 1) - 0.5) * MH;
+        if (m > 1.3) meterShot(held); // esperaste demasiado: el tiro sale tarde
+      }
+      return true;
+    }
+    if (st.mode === 'dunk') {
+      dunkT += dt; const u = Math.min(1, dunkT / 0.22);
+      ball.position.lerpVectors(dunkFrom, _w2.copy(RIM).setY(RIM.y + 0.3), smooth(u));
+      if (u >= 1) { ball.position.set(RIM.x, RIM.y + 0.16, RIM.z); st.v.set(0, -4, 0); Object.assign(st, { mode: 'fly', t: 0, inNet: 0, rim: false }); ctx.shake(0.6); }
+      return true;
     }
     if (st.mode === 'rest' || st.mode === 'drib') {
       ball.position.lerp(home(_h), 0.12); ball.rotation.y += dt;
@@ -1920,7 +2057,7 @@ function heat(ctx, opt) {
     }
     return false; // en el aire: la física de siempre (aro, tablero y piso)
   }
-  function xrDribble() { // cada bote contra tu piso cuenta para el ritmo (agranda el margen del tiro perfecto)
+  function xrDribble() { // cada bote contra tu piso cuenta para el ritmo (agranda el verde de la barra)
     drib.n++; drib.last = performance.now(); ctx.sfx('dribble');
     if (drib.n >= 2 && drib.n <= 4) ctx.pop(`RITMO x${drib.n}`, 'small');
   }
@@ -1953,19 +2090,21 @@ function heat(ctx, opt) {
     st.mode = 'fly'; st.t = 0; st.scored = false; st.inNet = 0; st.rim = false; st.perfect = perfect; st.err = err; st.slowed = false;
     shots++; drib.n = 0; info(); ctx.sfx('throw');
     // apunta solo hacia el aro (aunque mires hacia otro lado); soltar pronto = corto, tarde = largo
-    const toRim = _r.copy(RIM).sub(camera.position); toRim.y = 0; toRim.normalize();
+    const from = opt.xr ? ball.position : camera.position, toRim = _r.copy(RIM).sub(from); toRim.y = 0; toRim.normalize();
     const right = _k.set(-toRim.z, 0, toRim.x), tgt = RIM.clone().addScaledVector(right, lat * 0.5);
     if (perfect) tgt.add(_w.set(rnd(-0.02, 0.02), 0.02, rnd(-0.02, 0.02)));
     else { tgt.addScaledVector(toRim, err * 0.26 - 0.03).addScaledVector(right, rnd(-0.05, 0.05)); tgt.y += 0.03; }
-    const T = 0.95 + camera.position.distanceTo(RIM) * 0.02;
+    const T = 0.95 + from.distanceTo(RIM) * 0.02;
     st.v.copy(tgt).sub(ball.position).divideScalar(T); st.v.y += 0.5 * GRAV * T;
   }
   function score() {
     st.scored = true; st.inNet = 0.5; baskets++; streak++; cel = 2; netK = 1;
     const swish = !st.rim, wasFire = fire;
     if (streak >= 3 && !fire) { fire = true; ctx.pop('¡EN LLAMAS! 🔥', 'fire'); ctx.sfx('fire'); ctx.shake(0.5); }
-    const add2 = (wasFire ? 3 : 2) + (swish ? 1 : 0); pts += add2;
-    if (!(fire && !wasFire)) ctx.pop(swish ? `¡SWISH! +${add2}` : `¡CANASTA! +${add2}`, wasFire ? 'fire' : 'good');
+    const dk = opt.xr && st.dunk; st.dunk = false; // 🥽 en el visor: puntos según la zona (clavada = 4)
+    const add2 = opt.xr ? (dk ? 4 : XZ[zone].pts) + (wasFire ? 1 : 0) + (swish && !dk ? 1 : 0) : (wasFire ? 3 : 2) + (swish ? 1 : 0); pts += add2;
+    if (dk) { ctx.pop(`¡CLAVADA! +${add2}`, 'fire'); ctx.sfx('fire'); }
+    else if (!(fire && !wasFire)) ctx.pop(swish ? `¡SWISH! +${add2}` : `¡CANASTA! +${add2}`, wasFire ? 'fire' : 'good');
     info(); drawBoard(); ctx.shake(0.3);
     ctx.sfx('swish'); setTimeout(() => { ctx.sfx('crowd'); ctx.sfx('score'); }, 120);
     ctx.burst(RIM, fire ? [0xff6a1a, 0xffd54a, 0xffffff] : [0xff2a2a, 0xffffff, 0xf9a01b], 90, 2.5);
@@ -1992,13 +2131,13 @@ function heat(ctx, opt) {
     { t: 2.8, p: [1.5, 3.5, 5], yaw: 0.1, pitch: -0.05 },
     { t: 4.3, p: [0, 1.6, 0], yaw: 0, pitch: 0.18 }
   ], 0, 0.15);
-  const startHint = () => alive && ctx.hint(opt.xr ? '🤏 Junta los dedos sobre el balón para agarrarlo · lánzalo hacia el aro y suelta · suéltalo hacia el piso para driblar' : ctx.isHand()
+  const startHint = () => alive && ctx.hint(opt.xr ? '✋ Toca el balón con la palma · empújalo al piso para driblar · súbelo sobre tu cabeza y lánzalo en el <b>VERDE</b>' : ctx.isHand()
     ? '✋ Baja la mano rápido para <b>driblar</b> · súbela para <b>preparar</b> y lánzala hacia arriba cuando la marca esté en el <b>VERDE</b>'
     : '👆 <b>Toca</b> para driblar · <b>mantén</b> presionado y <b>suelta</b> cuando la marca esté en el <b>VERDE</b>');
   return {
-    camLock: !opt.quick, refreshHint: startHint, xrWorld: { type: 'room', keep: [H1.h, ball] }, xrInput,
+    camLock: !opt.quick, refreshHint: startHint, xrWorld: { type: 'room', keep: [H1.h, ball, meter3, zoneRing] }, xrInput,
     _dbg: { baskets: () => baskets, shots: () => shots, mode: () => st.mode, ball: () => ball.position.toArray(), rim: () => RIM.toArray() },
-    start() { running = true; this.camLock = false; info(); startHint(); },
+    start() { running = true; this.camLock = false; info(); startHint(); if (opt.xr) goZone(0); },
     onDown(p) {
       if (intro.on) { intro.finish(); this.camLock = false; return; }
       if (!running) return;
@@ -2094,7 +2233,7 @@ function heat(ctx, opt) {
         }
         if (!st.scored && st.v.y < 0 && prevY >= RIM.y && Pp.y < RIM.y && L < RR - BR * 0.3) score();
         if (st.inNet > 0) { st.inNet -= h; st.v.x *= 0.9; st.v.z *= 0.9; st.v.y = Math.max(st.v.y, -2.5); Pp.x = lerp(Pp.x, RIM.x, 0.1); Pp.z = lerp(Pp.z, RIM.z, 0.1); }
-        if (Pp.y < BR) { Pp.y = BR; if (st.v.y < -1 && st.t - st.lastBounce > 0.15) { ctx.sfx('bounce'); st.lastBounce = st.t; if (st.drib) xrDribble(); } st.v.y *= -0.72; st.v.x *= 0.85; st.v.z *= 0.85; }
+        if (Pp.y < BR) { Pp.y = BR; if (st.v.y < -1 && st.t - st.lastBounce > 0.15) { ctx.sfx('bounce'); st.lastBounce = st.t; if (st.drib) xrDribble(); } st.v.y *= -0.72; st.v.x *= 0.85; st.v.z *= 0.85; if (st.drib && st.dribH) { st.v.y = Math.sqrt(2 * GRAV * Math.max(0.2, st.dribH - BR)); st.v.x *= 0.3; st.v.z *= 0.3; } } // 🥽 dribleo: el rebote vuelve a tu mano
       }
       if (st.perfect && !st.slowed && Pp.distanceTo(RIM) < 1.4 && st.v.y < 0) { st.slowed = true; ctx.slowmo(0.5, 0.35); } // cámara lenta en el tiro perfecto
       ball.rotation.x -= dt * 8;
@@ -2104,7 +2243,7 @@ function heat(ctx, opt) {
         if (!st.scored && running && !st.drib) {
           if (fire) { fire = false; ctx.pop('SE APAGÓ EL FUEGO', 'bad'); drawBoard(); }
           streak = 0; info();
-          ctx.hint(opt.xr ? '¡Casi! Lanza el balón hacia arriba, en arco, apuntando al aro' : st.perfect ? '¡Casi! Rebotó en el aro. ¡Otra vez!' : st.err < 0 ? 'Soltaste muy pronto ⏳ espera a que la marca llegue al <b>VERDE</b>' : 'Soltaste muy tarde ⏩ suelta cuando la marca esté en el <b>VERDE</b>');
+          ctx.hint(opt.xr ? '¡Casi! Suelta el tiro cuando la marca esté en el <b>VERDE</b>' : st.perfect ? '¡Casi! Rebotó en el aro. ¡Otra vez!' : st.err < 0 ? 'Soltaste muy pronto ⏳ espera a que la marca llegue al <b>VERDE</b>' : 'Soltaste muy tarde ⏩ suelta cuando la marca esté en el <b>VERDE</b>');
           setTimeout(() => { if (running) startHint(); }, 2400);
         }
       }

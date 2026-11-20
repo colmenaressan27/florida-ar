@@ -21,15 +21,21 @@ Varitas, martillo, arco, escudo, lancha, moto acuática, tabla de surf, balones 
 - Héroes (vida de drones y jefe, cada cuánto disparan): `HZ` en `scenes2.js`.
 - Penales (los 3 porteros): `STY` en `scenes2.js`. Postes que se mueven en fútbol americano: `POST_X`, `PUSH_SP` y `CAM_LIFT` en `scenes2.js`.
 - 🥽 Modo Quest (visor Meta Quest): `QUEST` en `xr.js` (distancia del menú, sensibilidad del toque con el dedo, calidad y cuadros por segundo).
-  Golpe con la palma en Penales y Fútbol americano: `HANDKICK` en `xr.js`. Tamaño de la ventana al estadio: `WINDOW` en `xr.js`.
-  Lanzamiento en Miami Heat (distancia para agarrar, fuerza y ayuda hacia el aro): `XRB` en `scenes.js`.
+  Golpe con la palma en Penales MLS y Touchdown NFL: `HANDKICK` en `xr.js`. Tamaño de la ventana al estadio: `WINDOW` en `xr.js`.
+  Miami Heat en el visor: zonas de tiro `XZ` y barra de tiro, agarre, dribleo y clavada `XRB` en `scenes.js`.
+  Patada con los pies (cámara de la PC): `KICKCAM` en `sensor.js`.
+  Orlando en el visor (trazo en el aire, escudo con la palma, vitrina de varitas): `XO` en `scenes.js`. Isla de Héroes en el visor (escudo de la mano izquierda, golpe en la cabeza, lanzar el escudo): `XH` en `scenes2.js`.
 
 ## 🥽 Modo Quest (Meta Quest 3S)
 
 - Abre el enlace del juego en el navegador del visor (Meta Quest Browser). En «¿Cómo juegas?» aparece **🥽 Modo Quest** (solo en visores; en el celular no sale).
 - Ves tu cuarto (realidad mixta) con un menú flotante. **Toca** los botones con el dedo índice, o **apunta de lejos y junta el índice con el pulgar** (pinza). Con los controles, apunta y usa el gatillo.
-- **Penales y Fútbol americano:** el estadio se abre como una ventana frente a ti y el balón flota frente a tu cintura. Golpéalo con la palma: más rápido = más fuerte, hacia arriba = más alto y hacia un lado = apuntas a ese lado.
-- **Miami Heat:** el aro aparece en tu cuarto. Junta los dedos sobre el balón para agarrarlo, lánzalo hacia el aro y suelta. Si lo sueltas hacia el piso, driblas (el ritmo ayuda al tiro perfecto).
+- **Penales MLS y Touchdown NFL:** el estadio se abre como una ventana frente a ti y el balón flota frente a tu cintura. Golpéalo con la palma: más rápido = más fuerte, hacia arriba = más alto y hacia un lado = apuntas a ese lado.
+- **Miami Heat:** el aro aparece en tu cuarto. Toca el balón con la palma para agarrarlo y empújalo hacia el piso para driblar (el rebote vuelve a tu mano). Para tirar, súbelo sobre tu cabeza: aparece una barra (estilo 2K) y lo lanzas cuando la marca está en el VERDE. Tiras desde la bandeja, el doble y el triple; en la última zona puedes hacer una clavada (sube el balón y bájalo fuerte hacia el aro).
+- **🦶 Patear con tus pies (Penales MLS y Touchdown NFL):** en la tarjeta del juego elige «Con mis pies (PC)». En una PC con cámara abre `sensor.html` (la misma dirección del juego, terminada en `/sensor.html`), escribe el código que muestra el visor y pon la PC frente a ti, a 2 o 3 m, que te vea de cuerpo entero. El balón queda en tu piso y lo pateas de verdad. El video no sale de la PC; la PC y el visor se encuentran con PeerJS (servicio gratuito) y necesitan internet. Si la red de la universidad no los deja conectarse, comparte internet desde un celular a los dos.
 - A tu izquierda hay dos botones: 🏠 Menú y 🌍 Estadio (o Cancha) completo, que cambia la ventana por el estadio entero.
-- Orlando, Isla de Héroes, Miami urbano y el tour acuático dicen «Próximamente en Quest».
+- **Orlando (mundo en VR):** toca la varita que quieras en la vitrina y aparece en tu mano derecha. Junta índice y pulgar y dibuja en el aire la figura de la runa (zigzag = rayo, línea = desarme, círculo = escudo); al soltar los dedos sale el hechizo. Tu palma abierta hacia el mago también hace escudo. A tu derecha está la leyenda: toca un hechizo para ver cómo se dibuja.
+- **Isla de Héroes (mundo en VR):** toca el poder que quieras (rayo, flecha o escudo). Apunta con la mano derecha al dron del aro rojo y junta los dedos para atacar (el escudo también se lanza con el gesto). Tu mano izquierda lleva un escudo de energía: ponlo frente a las bolas rojas, o esquívalas moviéndote.
+- En los mundos tu cuarto no se ve, así que tus manos aparecen como puntos de luz.
+- Miami urbano y el tour acuático dicen «Próximamente en Quest».
 - Para probar en el computador sin visor: el emulador de Meta, Immersive Web Emulator (extensión de Chrome).
